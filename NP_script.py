@@ -44,7 +44,7 @@ index = sys.argv[1]
 start_day  = datetime.fromisoformat('2017-01-01T10:00:00');
 start_date = start_day + index * relativedelta(months=+1)
 NPw_o = NPw(config_npw, df_regressor,config_events)
-day = NPw_o.get_next_event(start_day)
+day = NPw_o.get_next_event(start_date)
 test_metrics = NPw_o.predict_with_offset_hours(day, hours_offsets, event_offsets)
 NPw_o.save_df( day.strftime("%m_%d_%Y_%H_%M_%S")) 
 
