@@ -23,6 +23,9 @@ dist/
 target/
 dist/
 data/
+lightning_logs/
+__pycache__/
+.ipynb_checkpoints/
 
 # JetBrains IDE
 .idea/
@@ -42,10 +45,5 @@ Thumbs.db
 *.war
 
 # Large media files
-*.mp4
-*.tiff
-*.avi
-*.flv
-*.mov
-*.wmv
+*csv
 
