@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from aux_function_SR import read_data,get_eq_filtered, SR_SENSORS
 import pandas as pd
 import numpy as np

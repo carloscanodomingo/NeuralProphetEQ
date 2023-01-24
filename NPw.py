@@ -168,7 +168,8 @@ class NPw:
 
                 
     def create_NP_model(self):
-        trainer_config = {"accelerator":"gpu"}
+        #trainer_config = {"accelerator":"gpu"}
+        trainer_config = {} #"accelerator":"gpu"}
         model = NeuralProphet(
         n_forecasts = int(self.config_npw.forecast_length / self.config_npw.freq),
         growth="off",
