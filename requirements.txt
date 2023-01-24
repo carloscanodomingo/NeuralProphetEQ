@@ -1,0 +1,7 @@
+h5py==3.7.0
+neuralprophet==0.5.1
+numpy==1.23.5
+pandas==1.5.2
+python_dateutil==2.8.2
+scikit_learn==1.2.0
+unique_names_generator==1.0.2
