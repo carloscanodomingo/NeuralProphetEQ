@@ -221,7 +221,10 @@ class NPw:
 
     def fit(self, model, df_train):
         if isinstance(self.config_npw, ConfigNPw):
-            model.fit(df_train)
+            if self.config_npw.verbose == False:
+                model.fit(df_train, minimal=True)
+            else:
+                model.fit(df_train, minimal=False)
             return model
 
     def fit_models(self):
@@ -314,11 +317,11 @@ class NPw:
         # Remove!!
         df = df.loc[df["expected_event"] != -24]
         
+        date_format = "%d-%m-%Y %H:%M:%S"
         # Group by the forecasting day
         for current_day in df["start_forecast"].unique():
             # Auto Get datetime format from string a
             current_day_datetime = dateutil.parser.parse(current_day)
-            
             # Get the index of the closest event based on envents_df
             loc_eq = np.argmin(abs(events_df["dates"] - current_day_datetime))
             
@@ -329,11 +332,21 @@ class NPw:
             current_df = df[df["start_forecast"] == current_day].reset_index()
             
             # Take the lowest as the reference could be removed
-            loc_min = np.argmin(
+            ref_min = np.min(
                 np.abs(current_df["actual_event"] - current_df["expected_event"])
             )
+            if ref_min > 24:
+                loc_min = np.where(current_df["expected_event"] == 0)[0][0]
+            else:
+                loc_min = 1
+                #np.argmin(
+                #np.abs(current_df["actual_event"] - current_df["expected_event"]))
+
+            #ref = current_df["actual_event"][loc_min]
+            dif = np.min(np.abs(current_df["actual_event"] - current_df["expected_event"]))
+            if dif > 24: 
+                dif = 0
             ref = current_df["actual_event"][loc_min]
-            
             # Get the index for the lowest metric value
             better_marc_loc = np.argmin(current_df[metric])
             
@@ -345,6 +358,7 @@ class NPw:
             diff_metrics = np.abs(
                 current_df[metric][predicted_class] - current_df[metric][correct_class]
             )
+            error = np.mean(current_df[metric])
             if correct_class == 0:
                 if predicted_class == 0:
                     result = "TN"
@@ -363,6 +377,7 @@ class NPw:
             dict_output = {
                 "date": current_day_datetime,
                 "ref": ref,
+                "error": error,
                 "correct_class": correct_class,
                 "predicted_class": predicted_class,
                 "type": result,
@@ -372,6 +387,8 @@ class NPw:
                 "dif_event": dif_event,
             }
             df_output = pd.concat([df_output, pd.DataFrame.from_dict([dict_output])])
+            
+        df_output = df_output.set_index("date").sort_values("date")
         return df_output
 
     def _____one_step_test(self):
@@ -430,6 +447,7 @@ class NPw:
     def get_metrics_from_df2(metrics, df):
         df_output = pd.DataFrame()
         df = df.loc[df["expected_event"] != -24]
+        df = df.loc[df["actual_event"] != -24]
 
         for current_day in df["start_forecast"].unique():
             current_day_datetime = dateutil.parser.parse(current_day)
@@ -439,7 +457,9 @@ class NPw:
             loc_min = np.argmin(
                 np.abs(current_df["actual_event"] - current_df["expected_event"])
             )
-            ref = current_df["actual_event"][loc_min]
+            dif = np.abs(current_df["actual_event"] - current_df["expected_event"])
+            dif[np.abs(dif) > 24] = 0
+            ref = dif #current_df["actual_event"][loc_min]
             better_marc_loc = np.argmin(current_df[metrics])
             n_classes = len(current_df)
             correct_class = loc_min

@@ -17,9 +17,9 @@ result = 0
 
 
 @click.command()
-@click.option("--epochs", default=None, help="Enter the number of epochs", type=int)
-@click.option("--day", default=1, help="Enter the first day to forecast", type=float)
-@click.option("--n_iteration", default="1", help="Enter the iteration number")
+@click.option("--epochs", default=0, help="Enter the number of epochs")
+@click.option("--day", default=1, help="Enter the first day to forecast from 2017-01-01", type=int)
+@click.option("--n_iteration", default="0", help="Enter the iteration number")
 @click.option(
     "--mode",
     default="daily",
@@ -27,10 +27,12 @@ result = 0
     help="Enter the mode",
 )
 @click.option("--gpu", default=False, type=bool, help="Use GPU?")
-def configure(epochs, day, n_iteration, mode, gpu):
+@click.option("--log", default=False, type=bool, help="Use GPU?")
+def configure(epochs, day, n_iteration, mode, gpu, log):
 
     set_log_level("ERROR")
-
+    if epochs == 0:
+        epochs = None
     delta = timedelta(minutes=30)
     # Read SR and EQ data
     df = read_data("NPdata.mat")
@@ -60,7 +62,6 @@ def configure(epochs, day, n_iteration, mode, gpu):
             "S9": NS_mean[:, 9],
         }
     )
-
     config_npw_d = {
         "forecast_length": timedelta(hours=24),
         "freq": timedelta(minutes=30),
@@ -70,7 +71,7 @@ def configure(epochs, day, n_iteration, mode, gpu):
         "n_lags": 5 * 48,
         "d_hidden": 16,
         "verbose": False,
-        "epochs": int(epochs),
+        "epochs": epochs,
         "gpu": gpu,
     }
     config_npw = ConfigNPw(**config_npw_d)
@@ -96,8 +97,8 @@ def configure(epochs, day, n_iteration, mode, gpu):
 
     start_day = datetime.fromisoformat("2017-01-01T10:00:00")
     NPw_o = NPw(config_npw, df_regressor, config_events)
-    start_date = start_day + int(day) * relativedelta(months=+1)
-    for index_day in range(int(n_iteration)):
+    start_date = start_day + int(day) * relativedelta(days=+1)
+    for index_day in range(int(n_iteration) + 1):
         current_day = start_date + index_day * relativedelta(days=+1)
         print(str(current_day))
         test_metrics = NPw_o.predict_with_offset_hours(
