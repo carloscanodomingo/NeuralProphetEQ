@@ -7,40 +7,28 @@ import pandas as pd
 from datetime import datetime, timedelta
 from NPw import NPw, ConfigEQ, ConfigNPw, ConfigForecast
 from dateutil.relativedelta import *
+
 # click_example.py
-import sys 
+import sys
 import click
- 
+
 # initialize result to 0
-result=0
- 
+result = 0
+
+
 @click.command()
-@click.option('--epochs',
-              default=None,
-              help='Enter the number of epochs',
-              type=int)
- 
-@click.option('--day',
-              default=1,
-              help='Enter the first day to forecast',
-              type=float)
- 
-@click.option('--n_iteration',
-              default='1',
-              help='Enter the iteration number')
- 
-@click.option('--mode',
-              default='daily',
-              type=click.Choice(['daily', 'monthly']),
-              help='Enter the mode')
-@click.option('--gpu',
-              default=False,
-              type=bool,
-              help='Use GPU?')
- 
-    
+@click.option("--epochs", default=None, help="Enter the number of epochs", type=int)
+@click.option("--day", default=1, help="Enter the first day to forecast", type=float)
+@click.option("--n_iteration", default="1", help="Enter the iteration number")
+@click.option(
+    "--mode",
+    default="daily",
+    type=click.Choice(["daily", "monthly"]),
+    help="Enter the mode",
+)
+@click.option("--gpu", default=False, type=bool, help="Use GPU?")
 def configure(epochs, day, n_iteration, mode, gpu):
-    
+
     set_log_level("ERROR")
 
     delta = timedelta(minutes=30)
@@ -83,7 +71,7 @@ def configure(epochs, day, n_iteration, mode, gpu):
         "d_hidden": 16,
         "verbose": False,
         "epochs": int(epochs),
-        "gpu": gpu
+        "gpu": gpu,
     }
     config_npw = ConfigNPw(**config_npw_d)
 
@@ -106,17 +94,17 @@ def configure(epochs, day, n_iteration, mode, gpu):
     hours_offsets = [0]
     event_offsets = [None, -timedelta(hours=12)]
 
-
-
     start_day = datetime.fromisoformat("2017-01-01T10:00:00")
     NPw_o = NPw(config_npw, df_regressor, config_events)
     start_date = start_day + int(day) * relativedelta(months=+1)
     for index_day in range(int(n_iteration)):
         current_day = start_date + index_day * relativedelta(days=+1)
         print(str(current_day))
-        test_metrics = NPw_o.predict_with_offset_hours(current_day, hours_offsets, event_offsets)
+        test_metrics = NPw_o.predict_with_offset_hours(
+            current_day, hours_offsets, event_offsets
+        )
         NPw_o.save_df(current_day.strftime("%m_%d_%Y_%H_%M_%S"))
 
- 
-if __name__ =='__main__':
+
+if __name__ == "__main__":
     configure()

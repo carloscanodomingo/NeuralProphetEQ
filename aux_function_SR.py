@@ -78,7 +78,11 @@ def get_eq_filtered(
         y_dict[name] = y - y_last
         y_last = y
 
-    return (out, out_raw, n_eq)
+    return (
+        out,
+        out_raw,
+        n_eq,
+    )
 
 
 def get_coef(d1, d2, m1, m2):
