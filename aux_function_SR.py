@@ -2,10 +2,12 @@ import h5py
 import pandas as pd
 import numpy as np
 
+
 class SR_SENSORS:
     NS = 1
     EW = 2
     BOTH = 3
+
 
 def get_eq_filtered(
     dist,
@@ -76,66 +78,66 @@ def get_eq_filtered(
         y_dict[name] = y - y_last
         y_last = y
 
-   
     return (out, out_raw, n_eq)
+
 
 def get_coef(d1, d2, m1, m2):
     A = np.log10(d2 / d1) / (m2 - m1)
     B = np.log10(d1) - A * m1
     return (A, B)
 
-def read_data(filepath): 
-        file = h5py.File(filepath, "r")
 
-        NS_mean = file.get("NS_mean")[()]
-        NS_mean = NS_mean.transpose()
+def read_data(filepath):
+    file = h5py.File(filepath, "r")
 
-        NS_std = file.get("NS_std")[()]
-        NS_std = NS_std.transpose()
+    NS_mean = file.get("NS_mean")[()]
+    NS_mean = NS_mean.transpose()
 
-        EW_mean = file.get("EW_mean")[()]
-        EW_mean = EW_mean.transpose()
+    NS_std = file.get("NS_std")[()]
+    NS_std = NS_std.transpose()
 
-        EW_std = file.get("EW_std")[()]
-        EW_std = EW_std.transpose()
+    EW_mean = file.get("EW_mean")[()]
+    EW_mean = EW_mean.transpose()
 
-        mag = file.get("mag")[()]
-        mag = mag.transpose()
+    EW_std = file.get("EW_std")[()]
+    EW_std = EW_std.transpose()
 
-        dist = file.get("dist")[()]
-        dist = dist.transpose()
+    mag = file.get("mag")[()]
+    mag = mag.transpose()
 
-        depth = file.get("depth")[()]
-        depth = depth.transpose()
+    dist = file.get("dist")[()]
+    dist = dist.transpose()
 
-        arc = file.get("arc")[()]
-        arc = arc.transpose()
+    depth = file.get("depth")[()]
+    depth = depth.transpose()
 
-        lat = file.get("lat")[()]
-        lat = lat.transpose()
+    arc = file.get("arc")[()]
+    arc = arc.transpose()
 
-        data = {
-            "lat": lat,
-            "NS_mean": NS_mean,
-            "NS_std": NS_std,
-            "EW_mean": EW_mean,
-            "EW_std": EW_std,
-            "arc": arc,
-            "mag": mag,
-            "dist": dist,
-            "depth": depth,
-        }
-        d = {
-            "NS_mean": pd.Series(tuple(data["NS_mean"])),
-            "NS_std": pd.Series(tuple(data["NS_std"])),
-            "EW_mean": pd.Series(tuple(data["EW_mean"])),
-            "EW_std": pd.Series(tuple(data["EW_std"])),
-            "lat": pd.Series(np.array(data["lat"]).squeeze()),
-            "arc": pd.Series(np.array(data["arc"]).squeeze()),
-            "mag": pd.Series(np.array(data["mag"]).squeeze()),
-            "dist": pd.Series(np.array(data["dist"]).squeeze()),
-            "depth": pd.Series(np.array(data["depth"]).squeeze()),
-        }
-        df = pd.DataFrame(d)
-        return df
-    
+    lat = file.get("lat")[()]
+    lat = lat.transpose()
+
+    data = {
+        "lat": lat,
+        "NS_mean": NS_mean,
+        "NS_std": NS_std,
+        "EW_mean": EW_mean,
+        "EW_std": EW_std,
+        "arc": arc,
+        "mag": mag,
+        "dist": dist,
+        "depth": depth,
+    }
+    d = {
+        "NS_mean": pd.Series(tuple(data["NS_mean"])),
+        "NS_std": pd.Series(tuple(data["NS_std"])),
+        "EW_mean": pd.Series(tuple(data["EW_mean"])),
+        "EW_std": pd.Series(tuple(data["EW_std"])),
+        "lat": pd.Series(np.array(data["lat"]).squeeze()),
+        "arc": pd.Series(np.array(data["arc"]).squeeze()),
+        "mag": pd.Series(np.array(data["mag"]).squeeze()),
+        "dist": pd.Series(np.array(data["dist"]).squeeze()),
+        "depth": pd.Series(np.array(data["depth"]).squeeze()),
+    }
+    df = pd.DataFrame(d)
+    return df
