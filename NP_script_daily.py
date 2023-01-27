@@ -86,7 +86,7 @@ def configure(epochs, day, n_iteration, mode, gpu, log):
         "dist_max": 6000,
         "lat_max": 360,
         "arc_max": 60,
-        "mag_start": 0.5,
+        "mag_start": 5.5,
         "mag_delta": 1,
         "dist_perct": 1000,
     }
