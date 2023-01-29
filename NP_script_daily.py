@@ -27,8 +27,9 @@ result = 0
     help="Enter the mode",
 )
 @click.option("--gpu", default=False, type=bool, help="Use GPU?")
-@click.option("--log", default=False, type=bool, help="Use GPU?")
-def configure(epochs, day, n_iteration, mode, gpu, log):
+@click.option("--log", default=False, type=bool, help="Show bar progres??")
+@click.option("--qm_len", default=24, type=int, help="Lenght of the question mark len")
+def configure(epochs, day, n_iteration, mode, gpu, log, qm_len):
 
     set_log_level("ERROR")
     if epochs == 0:
@@ -65,7 +66,7 @@ def configure(epochs, day, n_iteration, mode, gpu, log):
     config_npw_d = {
         "forecast_length": timedelta(hours=24),
         "freq": timedelta(minutes=30),
-        "question_mark_length": timedelta(hours=24),
+        "question_mark_length": timedelta(hours=qm_len),
         "num_hidden_layers": 2,
         "learning_rate": 0.01,
         "n_lags": 5 * 48,
@@ -86,14 +87,14 @@ def configure(epochs, day, n_iteration, mode, gpu, log):
         "dist_max": 6000,
         "lat_max": 360,
         "arc_max": 60,
-        "mag_start": 0.5,
+        "mag_start": 5.5,
         "mag_delta": 1,
         "dist_perct": 1000,
     }
     config_events = ConfigEQ(**ConfigEQ_d)
 
     hours_offsets = [0]
-    event_offsets = [None, -timedelta(hours=12), -timedelta(hours=24)]
+    event_offsets = [None,  -timedelta(hours=24)]
 
     start_day = datetime.fromisoformat("2017-01-01T10:00:00")
     NPw_o = NPw(config_npw, df_regressor, config_events)
