@@ -74,6 +74,7 @@ def configure(epochs, day, n_iteration, mode, gpu, log, qm_len):
         "verbose": False,
         "epochs": epochs,
         "gpu": gpu,
+        "binary_event": False
     }
     config_npw = ConfigNPw(**config_npw_d)
 
@@ -94,7 +95,7 @@ def configure(epochs, day, n_iteration, mode, gpu, log, qm_len):
     config_events = ConfigEQ(**ConfigEQ_d)
 
     hours_offsets = [0]
-    event_offsets = [None,  -timedelta(hours=24)]
+    event_offsets = [None,  -timedelta(hours=12)]
 
     start_day = datetime.fromisoformat("2017-01-01T10:00:00")
     NPw_o = NPw(config_npw, df_regressor, config_events)

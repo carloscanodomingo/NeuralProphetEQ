@@ -26,6 +26,7 @@ class ConfigNPw:
     verbose: bool
     epochs: int
     gpu: bool
+    binary_event: bool 
 
 
 @dataclass
@@ -92,7 +93,7 @@ class NPw:
 
     def get_next_event(self, start_time):
         loc_eq = np.where(self.input_events["dates"] > start_time)[0][0]
-        return self.input_eventsloc["dates"].iloc[loc_eq]
+        return self.input_events.loc["dates"].iloc[loc_eq]
 
     def get_events(self, config_event):
         if  True: #isinstance(config_event, ConfigEQ):
@@ -145,19 +146,41 @@ class NPw:
             < start_forecast_time + self.config_npw.forecast_length
         ]
 
+
         n_samples = len(base_df)
         model = self.create_NP_model()
         # Remove all EQ after question_mark_start
         dates_events = self.input_events["dates"]
-        events = dates_events[dates_events < question_mark_start]
+        mag_events = self.input_events["mag"]
+        dist_events = self.input_events["dist"]
+        current_events_dates = dates_events[dates_events < question_mark_start]
 
         # Insert with negative offset
         if config_forecast.offset_event is not None:
             events = pd.concat(
                 [events, pd.Series(start_forecast_time + config_forecast.offset_event)]
             )
-
-        [model, df_with_events] = self.add_events_neural_prophet(model, base_df, events)
+        if self.config_npw.binary_event: 
+            [model, df_with_events] = self.add_events_neural_prophet(model, base_df, ["EV"], current_events_dates)
+            current = df_with_events.set_index("ds")
+        else:
+            # Get anmes of event parameter
+            column_names = self.input_events.columns.drop("dates")
+            # Add all names to the model and create a df with dates event for every column
+            [model, df_with_events] = self.add_events_neural_prophet(model, base_df, column_names, current_events_dates)
+            # for each column name do 
+            for current_column_name in column_names:
+                # Get the values of the column
+                current_column = self.input_events.loc[:,current_column_name]
+                # Select just the needed for this fc
+                column_events = current_column[dates_events < question_mark_start]
+                # convert datetime to index of the df
+                current = df_with_events.set_index("ds")
+                # For each column name
+                for (current_date, current_event) in zip(current_events_dates, column_events):
+                    current.loc[current_date, current_column_name] = current_event
+                df_with_events = current.reset_index()
+  
         df_train, df_test = model.split_df(df_with_events, valid_p=1, local_split=True)
 
         start_fc = config_forecast.start_forecast
@@ -193,16 +216,20 @@ class NPw:
         ]
         return test_metrics
 
-    def add_events_neural_prophet(self, model, base_df, events):
+    def add_events_neural_prophet(self, model, base_df, name_events, dates_event):
         # Create EQ dataframe
-        df_events = pd.DataFrame(
-            {
-                "event": "EV",
-                "ds": events,
-            }
-        )
-        model = model.add_events(["EV"])
-        df_with_events = model.create_df_with_events(base_df, df_events)
+        df_complete = pd.DataFrame()
+        for name_event in name_events:
+            df_events = pd.DataFrame(
+                {
+                    "event": name_event,
+                    "ds": dates_event,
+                }
+            )
+            df_complete = pd.concat([df_complete, df_events])
+  
+        model = model.add_events(list(name_events))
+        df_with_events = model.create_df_with_events(base_df, df_complete)
 
         return [model, df_with_events]
 
@@ -371,7 +398,7 @@ class NPw:
             events_df_dates = self.input_events
         else:
             # This can be reduced
-            events_df_dates = self.get_events(config_events)
+            events_df_dates= self.get_events(config_events)
         
         df_output = pd.DataFrame()
         
