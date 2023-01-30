@@ -157,8 +157,8 @@ class NPw:
 
         # Insert with negative offset
         if config_forecast.offset_event is not None:
-            events = pd.concat(
-                [events, pd.Series(start_forecast_time + config_forecast.offset_event)]
+            current_events_dates = pd.concat(
+                [current_events_dates, pd.Series(start_forecast_time + config_forecast.offset_event)]
             )
         if self.config_npw.binary_event: 
             [model, df_with_events] = self.add_events_neural_prophet(model, base_df, ["EV"], current_events_dates)
