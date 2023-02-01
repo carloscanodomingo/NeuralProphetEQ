@@ -10,10 +10,7 @@ class SR_SENSORS:
 
 
 def get_eq_filtered(
-    dist,
-    mag,
-    lat,
-    arc,
+    df_events,
     dist_start,
     dist_delta,
     dist_max,
@@ -26,6 +23,10 @@ def get_eq_filtered(
     eq_window,
     SR_sensor,
 ):
+    mag = df_events["mag"].copy()
+    dist = df_events["dist"].copy()
+    arc = df_events["arc"].copy()
+    lat = df_events["lat"].copy()
     m1 = mag_start
     m2 = m1 + mag_delta
     arc_max_cos = np.abs(np.cos(np.deg2rad(arc_max)))

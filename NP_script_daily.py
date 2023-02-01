@@ -18,7 +18,9 @@ result = 0
 
 @click.command()
 @click.option("--epochs", default=0, help="Enter the number of epochs")
-@click.option("--day", default=1, help="Enter the first day to forecast from 2017-01-01", type=int)
+@click.option(
+    "--day", default=1, help="Enter the first day to forecast from 2017-01-01", type=int
+)
 @click.option("--n_iteration", default="0", help="Enter the iteration number")
 @click.option(
     "--mode",
@@ -63,42 +65,15 @@ def configure(epochs, day, n_iteration, mode, gpu, log, qm_len):
             "S9": NS_mean[:, 9],
         }
     )
-    config_npw_d = {
-        "forecast_length": timedelta(hours=24),
-        "freq": timedelta(minutes=30),
-        "question_mark_length": timedelta(hours=qm_len),
-        "num_hidden_layers": 2,
-        "learning_rate": 0.01,
-        "n_lags": 5 * 48,
-        "d_hidden": 16,
-        "verbose": False,
-        "epochs": epochs,
-        "gpu": gpu,
-        "binary_event": False
-    }
-    config_npw = ConfigNPw(**config_npw_d)
-
-    ConfigEQ_d = {
-        "mag_array": df["mag"].to_numpy(),
-        "dist_array": df["dist"].to_numpy(),
-        "lat_array": df["lat"].to_numpy(),
-        "arc_array": df["arc"].to_numpy(),
-        "dist_start": 4000,
-        "dist_delta": 2000,
-        "dist_max": 6000,
-        "lat_max": 360,
-        "arc_max": 60,
-        "mag_start": 5.5,
-        "mag_delta": 1,
-        "dist_perct": 1000,
-    }
-    config_events = ConfigEQ(**ConfigEQ_d)
+    df_events = df_SR.loc[:, ["mag", "dist", "lat", "arc"]]
+    config_path = "config_001.json"
+    (config_npw, config_events) = NPw.load_config(config_path)
 
     hours_offsets = [0]
-    event_offsets = [None,  -timedelta(hours=12)]
+    event_offsets = [None, -timedelta(hours=12)]
 
     start_day = datetime.fromisoformat("2017-01-01T10:00:00")
-    NPw_o = NPw(config_npw, df_regressor, config_events)
+    NPw_o = NPw(config_npw, df_regressor, config_events, df_events)
     start_date = start_day + int(day) * relativedelta(days=+1)
     for index_day in range(int(n_iteration) + 1):
         current_day = start_date + index_day * relativedelta(days=+1)

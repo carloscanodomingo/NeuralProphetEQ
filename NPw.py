@@ -1,6 +1,6 @@
 import pandas as pd
 from neuralprophet import NeuralProphet, save, load
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from aux_function_SR import get_eq_filtered, SR_SENSORS
 import numpy as np
@@ -12,29 +12,29 @@ import dateutil.parser
 import os
 from pathlib import Path
 from IPython.display import display, HTML
+import json
 
 
 @dataclass
 class ConfigNPw:
-    forecast_length: timedelta
-    freq: timedelta
+    forecast_length: pd.Timedelta
+    freq: pd.Timedelta
     num_hidden_layers: int
     learning_rate: float
     n_lags: int
     d_hidden: int
-    question_mark_length: timedelta
+    question_mark_length: pd.Timedelta
     verbose: bool
     epochs: int
     gpu: bool
-    binary_event: bool 
-
+    binary_event: bool
+    def __post_init__(self):
+            self.forecast_length = pd.Timedelta(self.forecast_length)
+            self.freq = pd.Timedelta(self.freq)
+            self.question_mark_length = pd.Timedelta(self.question_mark_length)
 
 @dataclass
 class ConfigEQ:
-    mag_array: np.ndarray
-    dist_array: np.ndarray
-    lat_array: np.ndarray
-    arc_array: np.ndarray
     dist_start: int
     dist_delta: int
     dist_max: int
@@ -69,7 +69,7 @@ def multivariate_df(df):
 
 
 class NPw:
-    def __init__(self, config_npw, df, config_events):
+    def __init__(self, config_npw, df, config_events, df_events):
         self.NPw_columns = [
             "start_forecast",
             "n_samples",
@@ -81,6 +81,7 @@ class NPw:
             "expected_event",
         ]
         self.config_npw = config_npw
+        self.df_events = df_events
         # Convert from wide format to long format
         self.input_df = df
         self.name = get_random_name(
@@ -96,12 +97,9 @@ class NPw:
         return self.input_events.loc["dates"].iloc[loc_eq]
 
     def get_events(self, config_event):
-        if  True: #isinstance(config_event, ConfigEQ):
+        if True:  # isinstance(config_event, ConfigEQ):
             [_, earthquake_raw, _] = get_eq_filtered(
-                config_event.dist_array,
-                config_event.mag_array,
-                config_event.lat_array,
-                config_event.arc_array,
+                self.df_events,
                 config_event.dist_start,
                 config_event.dist_delta,
                 config_event.dist_max,
@@ -114,10 +112,15 @@ class NPw:
                 1,
                 SR_SENSORS.NS,
             )
-            arc = config_event.arc_array[earthquake_raw > 0.0]
+            arc = self.df_events.loc[:, "arc"][earthquake_raw > 0.0]
             arc = np.abs(np.cos(np.deg2rad(90 + arc)))
             events = pd.DataFrame(
-                {"dates": self.input_df["ds"][earthquake_raw > 0.0], "dist": config_event.dist_array[earthquake_raw > 0.0] / 1000, "mag": config_event.mag_array[earthquake_raw > 0.0], "arc": arc}
+                {
+                    "dates": self.input_df["ds"][earthquake_raw > 0.0],
+                    "dist": self.df_events.loc[:, "dist"][earthquake_raw > 0.0] / 1000,
+                    "mag": self.df_events.loc[:, "mag"][earthquake_raw > 0.0],
+                    "arc": arc,
+                }
             )
         else:
             raise TypeError("The configuration file is not valid")
@@ -146,7 +149,6 @@ class NPw:
             < start_forecast_time + self.config_npw.forecast_length
         ]
 
-
         n_samples = len(base_df)
         model = self.create_NP_model()
         # Remove all EQ after question_mark_start
@@ -158,31 +160,44 @@ class NPw:
         # Insert with negative offset
         if config_forecast.offset_event is not None:
             current_events_dates = pd.concat(
-                [current_events_dates, pd.Series(start_forecast_time + config_forecast.offset_event)]
+                [
+                    current_events_dates,
+                    pd.Series(start_forecast_time + config_forecast.offset_event),
+                ]
             )
-        if self.config_npw.binary_event: 
-            [model, df_with_events] = self.add_events_neural_prophet(model, base_df, ["EV"], current_events_dates)
+        if self.config_npw.binary_event:
+            [model, df_with_events] = self.add_events_neural_prophet(
+                model, base_df, ["EV"], current_events_dates
+            )
             current = df_with_events.set_index("ds")
         else:
             # Get anmes of event parameter
             column_names = self.input_events.columns.drop("dates")
             # Add all names to the model and create a df with dates event for every column
-            [model, df_with_events] = self.add_events_neural_prophet(model, base_df, column_names, current_events_dates)
-            # for each column name do 
+            [model, df_with_events] = self.add_events_neural_prophet(
+                model, base_df, column_names, current_events_dates
+            )
+            # for each column name do
             for current_column_name in column_names:
                 # Get the values of the column
-                current_column = self.input_events.loc[:,current_column_name]
+                current_column = self.input_events.loc[:, current_column_name]
                 # Select just the needed for this fc
                 column_events = current_column[dates_events < question_mark_start]
+
+                if config_forecast.offset_event is not None:
+                    column_events = pd.concat(
+                        [column_events, pd.Series(np.mean(column_events))]
+                    )
                 # convert datetime to index of the df
                 current = df_with_events.set_index("ds")
                 # For each column name
-                for (current_date, current_event) in zip(current_events_dates, column_events):
+                for (current_date, current_event) in zip(
+                    current_events_dates, column_events
+                ):
                     current.loc[current_date, current_column_name] = current_event
                 df_with_events = current.reset_index()
-  
+        
         df_train, df_test = model.split_df(df_with_events, valid_p=1, local_split=True)
-
         start_fc = config_forecast.start_forecast
         # Duration between all actual events and the start of the forecast
         dif_duration = np.asarray([event - start_fc for event in dates_events])
@@ -220,14 +235,9 @@ class NPw:
         # Create EQ dataframe
         df_complete = pd.DataFrame()
         for name_event in name_events:
-            df_events = pd.DataFrame(
-                {
-                    "event": name_event,
-                    "ds": dates_event,
-                }
-            )
-            df_complete = pd.concat([df_complete, df_events])
-  
+            current_df_events = pd.DataFrame({"event": name_event, "ds": dates_event,})
+            df_complete = pd.concat([df_complete, current_df_events])
+
         model = model.add_events(list(name_events))
         df_with_events = model.create_df_with_events(base_df, df_complete)
 
@@ -327,26 +337,27 @@ class NPw:
         for file in Path(dir_path).glob("*.csv"):
             with file as f:
                 self.npw_df = pd.concat([self.npw_df, pd.read_csv(f)])
+
     def remove_experiments(self, case):
         self.npw_df = self.npw_df.loc[self.npw_df["expected_event"] != case]
-        
+
     def get_binary_perform(self, metrics, min_limit, max_limit, config_events=None):
         df = self.get_binary_results(metrics, min_limit, max_limit, config_events)
-              #Get the confusion matrix
+        # Get the confusion matrix
         cm = confusion_matrix(df["actual_class"], df["predicted_class"])
-        #Now the normalize the diagonal entries
-        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-        
+        # Now the normalize the diagonal entries
+        cm = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis]
+
         return np.nan_to_num(cm.diagonal()), cm
-    
+
     def pre_binary_perform_fast(self, metric):
-                
+
         df_pre = pd.DataFrame()
         # df data from the object
         df = self.npw_df
-        #Remove NA
+        # Remove NA
         df = df.fillna(0)
-        
+
         date_format = "%d-%m-%Y %H:%M:%S"
         # Group by the forecasting day
         for current_day in df["start_forecast"].unique():
@@ -354,12 +365,12 @@ class NPw:
             current_day_datetime = dateutil.parser.parse(current_day)
             # Select all the cases for the same day
             current_df = df[df["start_forecast"] == current_day].reset_index()
-            
+
             # Get the location of no event
             loc_no_event = np.where(current_df["expected_event"] == 0)[0]
-            
+
             best_class = np.argmin(current_df[metric])
-            
+
             if best_class == loc_no_event:
                 predicted_class = 0
             else:
@@ -370,73 +381,83 @@ class NPw:
             }
             df_pre = pd.concat([df_pre, pd.DataFrame.from_dict([dict_pre])])
         return df_pre
-    
-    def get_binary_perform_fast(self,df, min_limit, max_limit, config_events=None):
+
+    def get_binary_perform_fast(self, df, min_limit, max_limit, config_events=None):
+        
         if config_events == None:
             events_df_dates = self.input_events["dates"]
         else:
             events_df_dates = self.get_events(config_events)["dates"]
-            
         if len(events_df_dates) == 0:
-            return np.zeros(len(df["predicted_class"].unique()) + 1)
+            return [np.zeros(len(df["predicted_class"].unique()) + 1), None]
+         
         # Diference between events and each row in seconds
-        dif = [(events_df_dates.iloc[np.argmin(abs(events_df_dates - current_day))]  - current_day).total_seconds()  for current_day in df["dates"]]
-        ground_truth = [int(closest_eq) in range(-min_limit * 3600, max_limit * 3600 - 1) for closest_eq in dif]
-        #Get the confusion matrix
+        dif = [
+            (
+                events_df_dates.iloc[np.argmin(abs(events_df_dates - current_day))]
+                - current_day
+            ).total_seconds()
+            for current_day in df["dates"]
+        ]
+        ground_truth = [
+            int(closest_eq) in range(-min_limit * 3600, max_limit * 3600 - 1)
+            for closest_eq in dif
+        ]
+        # Get the confusion matrix
         cm = confusion_matrix(ground_truth, df["predicted_class"])
-        #Now the normalize the diagonal entries
-        with np.errstate(divide='ignore', invalid='ignore'):
-            cm_norm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-        results = np.append(np.nan_to_num(cm_norm.diagonal()), (cm[1,1]/cm[0,0]))
-        
-        return results, cm
-        
-        
-    def get_binary_results(self, metric, min_limit, max_limit, config_events=None, minimal = False):
+        # Now the normalize the diagonal entries
+        with np.errstate(divide="ignore", invalid="ignore"):
+            cm_norm = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis]
+        results = np.append(np.nan_to_num(cm_norm.diagonal()), (cm[1, 1] / cm[0, 0]))
+
+        return [results, cm]
+
+    def get_binary_results(
+        self, metric, min_limit, max_limit, config_events=None, minimal=False
+    ):
 
         if config_events == None:
             events_df_dates = self.input_events
         else:
             # This can be reduced
-            events_df_dates= self.get_events(config_events)
-        
+            events_df_dates = self.get_events(config_events)
+
         df_output = pd.DataFrame()
-        
+
         # df data from the object
         df = self.npw_df
-        
-        #Remove NA
+
+        # Remove NA
         df = df.fillna(0)
-        
+
         date_format = "%d-%m-%Y %H:%M:%S"
         # Group by the forecasting day
         for current_day in df["start_forecast"].unique():
             # Auto Get datetime format from string a
             current_day_datetime = dateutil.parser.parse(current_day)
-            
+
             # Get the index of the closest event based on envents_df
             loc_eq = np.argmin(abs(events_df_dates["dates"] - current_day_datetime))
-            
+
             # IF there is a event in the next 24 hours it should be discarted.
-            
+
             # Get the closest event to the forecasting day and convert to a dictionary
             event = events_df_dates.iloc[loc_eq].to_dict()
 
             # Time diference between the event and the current hour
             dif_event_in_s = (event["dates"] - current_day_datetime).total_seconds()
-            
+
             dif_event = divmod(dif_event_in_s, 3600)[0]
             # Select all the cases for the same day
             current_df = df[df["start_forecast"] == current_day].reset_index()
-            
+
             # Get the location of no event
             loc_no_event = np.where(current_df["expected_event"] == 0)[0]
-            
-            #[int(a in range(-24, 24)) for a in current_df.npw_df["actual_event"]]
-            
-            
+
+            # [int(a in range(-24, 24)) for a in current_df.npw_df["actual_event"]]
+
             # If there was an event in the last min_limit hours, it will count as 0 else 1
-            if np.any((dif_event>= -min_limit) & (dif_event < max_limit)):
+            if np.any((dif_event >= -min_limit) & (dif_event < max_limit)):
                 actual_class = 1
             else:
                 actual_class = 0
@@ -444,25 +465,31 @@ class NPw:
                 np.abs(current_df["actual_event"] - current_df["expected_event"])
             )
             ref = np.mean(current_df["actual_event"])
-            
+
             best_class = np.argmin(current_df[metric])
-            
+
             if best_class == loc_no_event:
                 predicted_class = 0
             else:
                 predicted_class = 1
-                
-#            for index_row in range
-            
+
+            #            for index_row in range
+
             current_metrics = current_df[metric]
-            
-            metrics_event_value = [(event_metrics - current_metrics.iloc[loc_no_event]).values[0] for event_metrics in  current_metrics.drop(loc_no_event)]
-            names = ["event_" + metric + "_" + str(index) for index in range(len(metrics_event_value))]
-            d_events = dict(zip(names,metrics_event_value))  
-            
+
+            metrics_event_value = [
+                (event_metrics - current_metrics.iloc[loc_no_event]).values[0]
+                for event_metrics in current_metrics.drop(loc_no_event)
+            ]
+            names = [
+                "event_" + metric + "_" + str(index)
+                for index in range(len(metrics_event_value))
+            ]
+            d_events = dict(zip(names, metrics_event_value))
+
             # Get number of classes == rows for a particular day
             n_classes = len(current_df)
-            
+
             diff_metrics = np.abs(
                 current_df[metric][predicted_class] - current_df[metric][actual_class]
             )
@@ -478,7 +505,6 @@ class NPw:
                 else:
                     result = "TP"
 
-
             dict_output = {
                 "date": current_day_datetime,
                 "ref": ref,
@@ -493,22 +519,23 @@ class NPw:
                 "dif_event": dif_event,
             }
             df_output = pd.concat([df_output, pd.DataFrame.from_dict([dict_output])])
-            
+
         df_output = df_output.set_index("date").sort_values("date")
         return df_output
+
     def _____get_binary_results(self, metric, config_events=None):
         if config_events == None:
             config_events = self.config_events
         events_df = self.get_events(config_events)
-                
+
         df_output = pd.DataFrame()
-        
+
         # df data from the object
         df = self.npw_df
-        
-        #Remove NA
+
+        # Remove NA
         df = df.fillna(0)
-        
+
         date_format = "%d-%m-%Y %H:%M:%S"
         # Group by the forecasting day
         for current_day in df["start_forecast"].unique():
@@ -516,22 +543,24 @@ class NPw:
             current_day_datetime = dateutil.parser.parse(current_day)
             # Get the index of the closest event based on envents_df
             loc_eq = np.argmin(abs(events_df["dates"] - current_day_datetime))
-            
+
             # Get the closest event to the forecasting day and convert to a dictionary
             event = events_df.iloc[loc_eq].to_dict()
 
             # Time diference between the event and the current hour
             dif_event_in_s = (event["dates"] - current_day_datetime).total_seconds()
-            
+
             dif_event = divmod(dif_event_in_s, 3600)[0]
             # Select all the cases for the same day
             current_df = df[df["start_forecast"] == current_day].reset_index()
-            
+
             # Get the location of no event
             loc_no_event = np.where(current_df["expected_event"] == 0)[0]
-            
+
             # If there was an event in the last 24 hours, it will count as 0 else 1
-            if np.any((current_df["actual_event"] >= -24) & (current_df["actual_event"] < 0)):
+            if np.any(
+                (current_df["actual_event"] >= -24) & (current_df["actual_event"] < 0)
+            ):
                 actual_class = 1
             else:
                 actual_class = 0
@@ -539,25 +568,31 @@ class NPw:
                 np.abs(current_df["actual_event"] - current_df["expected_event"])
             )
             ref = np.mean(current_df["actual_event"])
-            
+
             best_class = np.argmin(current_df[metric])
-            
+
             if best_class == loc_no_event:
                 predicted_class = 0
             else:
                 predicted_class = 1
-                
-#            for index_row in range
-            
+
+            #            for index_row in range
+
             current_metrics = current_df[metric]
-            
-            metrics_event_value = [(event_metrics - current_metrics.iloc[loc_no_event]).values[0] for event_metrics in  current_metrics.drop(loc_no_event)]
-            names = ["event_" + metric + "_" + str(index) for index in range(len(metrics_event_value))]
-            d_events = dict(zip(names,metrics_event_value))  
-            
+
+            metrics_event_value = [
+                (event_metrics - current_metrics.iloc[loc_no_event]).values[0]
+                for event_metrics in current_metrics.drop(loc_no_event)
+            ]
+            names = [
+                "event_" + metric + "_" + str(index)
+                for index in range(len(metrics_event_value))
+            ]
+            d_events = dict(zip(names, metrics_event_value))
+
             # Get number of classes == rows for a particular day
             n_classes = len(current_df)
-            
+
             diff_metrics = np.abs(
                 current_df[metric][predicted_class] - current_df[metric][actual_class]
             )
@@ -573,7 +608,6 @@ class NPw:
                 else:
                     result = "TP"
 
-
             dict_output = {
                 "date": current_day_datetime,
                 "ref": ref,
@@ -588,9 +622,10 @@ class NPw:
                 "dif_event": dif_event,
             }
             df_output = pd.concat([df_output, pd.DataFrame.from_dict([dict_output])])
-            
+
         df_output = df_output.set_index("date").sort_values("date")
         return df_output
+
     def _____one_step_test(self):
         # https://towardsdatascience.com/efficiently-iterating-over-rows-in-a-pandas-dataframe-7dd5f9992c01
         for index in self.npw_df.index:
@@ -615,7 +650,19 @@ class NPw:
                 self.npw_df.at[index, "test_metrics"] = mean_squared_error(
                     y_actual, y_predicted
                 )
-
+    @staticmethod
+    def save_config(config_path, config_npw, config_events):
+        config_npw_json = json.dumps([asdict(config_npw), asdict(config_events)], indent=4, sort_keys=True, default=str)
+        with open(config_path, "w") as outfile:
+            outfile.write(config_npw_json)
+    @staticmethod
+    def load_config(path):
+        with open("sample.json", "r") as infile:
+            data=infile.read();
+            data=json.loads(data)
+        config_npw = ConfigNPw(**data[0])
+        config_events = ConfigEQ(**data[1])
+        return (config_npw, config_events)       
     @staticmethod
     def load_class(filename):
         with open(filename + ".pkl", "rb") as f:
@@ -646,23 +693,20 @@ class NPw:
     @staticmethod
     def get_metrics_from_df2(metrics, df):
         df_output = pd.DataFrame()
-        #df = df.loc[df["expected_event"] != -24]
-        #df = df.loc[df["actual_event"] != -24]
+        # df = df.loc[df["expected_event"] != -24]
+        # df = df.loc[df["actual_event"] != -24]
 
         for current_day in df["start_forecast"].unique():
             current_day_datetime = dateutil.parser.parse(current_day)
             # Get all the cases for the same day
             current_df = df[df["start_forecast"] == current_day].reset_index()
             # Take the lowest as the reference
-            
-            
-            
+
             n_classes = len(current_df)
             actual_class = loc_min
             predicted_class = better_marc_loc
             diff_metrics = np.abs(
-                current_df[metrics][predicted_class]
-                - current_df[metrics][actual_class]
+                current_df[metrics][predicted_class] - current_df[metrics][actual_class]
             )
             if actual_class == 0:
                 if predicted_class == 0:
