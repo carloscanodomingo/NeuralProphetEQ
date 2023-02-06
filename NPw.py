@@ -1,8 +1,9 @@
 import pandas as pd
-from neuralprophet import NeuralProphet, save, load
+from neuralprophet import NeuralProphet, forecaster, load
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from aux_function_SR import get_eq_filtered, SR_SENSORS
+from NPw_aux import prepare_eq
 import numpy as np
 from sklearn.metrics import mean_squared_error, mean_absolute_error, confusion_matrix
 from unique_names_generator import get_random_name
@@ -11,38 +12,52 @@ from dateutil.relativedelta import *
 import dateutil.parser
 import os
 from pathlib import Path
-from IPython.display import display, HTML
+from enum import Enum
+
+from IPython.display import display
+from IPython.core.display import HTML
 import json
+
+
+class EventFC(Enum):
+    NP = 0
 
 
 @dataclass
 class ConfigNPw:
+    type = EventFC.NP
     forecast_length: pd.Timedelta
     freq: pd.Timedelta
     num_hidden_layers: int
     learning_rate: float
-    n_lags: int
     d_hidden: int
     question_mark_length: pd.Timedelta
     verbose: bool
     epochs: int
     gpu: bool
     binary_event: bool
+    historic_lenght: pd.Timedelta
+    drop_missing: bool
+    multivariate_global: bool
+    training_length: pd.Timedelta
+    normalization: bool
+    regularization: float
+
     def __post_init__(self):
-            self.forecast_length = pd.Timedelta(self.forecast_length)
-            self.freq = pd.Timedelta(self.freq)
-            self.question_mark_length = pd.Timedelta(self.question_mark_length)
+        self.forecast_length = pd.Timedelta(self.forecast_length)
+        self.historic_lenght = pd.Timedelta(self.historic_lenght)
+        self.freq = pd.Timedelta(self.freq)
+        self.question_mark_length = pd.Timedelta(self.question_mark_length)
+        self.training_length = pd.Timedelta(self.training_length)
+
 
 @dataclass
 class ConfigEQ:
     dist_start: int
     dist_delta: int
-    dist_max: int
-    lat_max: int
-    arc_max: int
     mag_start: float
     mag_delta: float
-    dist_perct: float
+    filter: bool
 
 
 @dataclass
@@ -68,6 +83,9 @@ def multivariate_df(df):
     return mv_df
 
 
+METRICS = ["MAE", "RMSE"]
+
+
 class NPw:
     def __init__(self, config_npw, df, config_events, df_events):
         self.NPw_columns = [
@@ -89,42 +107,55 @@ class NPw:
         )
         self.input_l_df = multivariate_df(df)
         self.config_events = config_events
-        self.input_events = self.get_events(self.config_events)
+        self.input_events, self.transform = self.get_events(self.config_events)
         self.npw_df = pd.DataFrame(columns=self.NPw_columns)
-
-    def get_next_event(self, start_time):
-        loc_eq = np.where(self.input_events["dates"] > start_time)[0][0]
-        return self.input_events.loc["dates"].iloc[loc_eq]
+        self.n_forecasts = int(self.config_npw.forecast_length / self.config_npw.freq)
+        self.n_lags = int(self.config_npw.historic_lenght / self.config_npw.freq)
+        self.metrics_test = pd.DataFrame(columns=METRICS)
+        self.metrics_train = pd.DataFrame(columns=METRICS)
+        self.folds = list()
+        self.n_fold = 0
 
     def get_events(self, config_event):
         if True:  # isinstance(config_event, ConfigEQ):
-            [_, earthquake_raw, _] = get_eq_filtered(
+            events = prepare_eq(
                 self.df_events,
                 config_event.dist_start,
                 config_event.dist_delta,
-                config_event.dist_max,
-                config_event.lat_max,
-                config_event.arc_max,
                 config_event.mag_start,
                 config_event.mag_delta,
-                config_event.dist_perct,
-                1,
-                1,
-                SR_SENSORS.NS,
+                config_event.filter,
             )
-            arc = self.df_events.loc[:, "arc"][earthquake_raw > 0.0]
-            arc = np.abs(np.cos(np.deg2rad(90 + arc)))
-            events = pd.DataFrame(
-                {
-                    "dates": self.input_df["ds"][earthquake_raw > 0.0],
-                    "dist": self.df_events.loc[:, "dist"][earthquake_raw > 0.0] / 1000,
-                    "mag": self.df_events.loc[:, "mag"][earthquake_raw > 0.0],
-                    "arc": arc,
-                }
-            )
+            return events
         else:
             raise TypeError("The configuration file is not valid")
         return events
+
+    def get_folds(self, k=5, fold_pct=0.10, fold_overlap_pct=0.5):
+        if self.config_npw.type == EventFC.NP:
+            model = self.create_NP_model()
+            self.folds = list()
+            # Own fold method
+            start_folds = int(self.config_npw.training_length / self.config_npw.freq)
+            len_folds = int((len(self.input_df) - start_folds) / k)
+            for index_fold in range(1, k + 1):
+                fold = self.input_df[: start_folds + (index_fold * len_folds)]
+                self.folds.append(fold)
+            # self.folds = model.crossvalidation_split_df(self.input_l_df, self.config_npw.freq, k, fold_pct, fold_overlap_pct)
+            self.n_fold = 0
+
+    def process_fold(self, index_fold):
+        if self.n_fold < len(self.folds):
+            df_train = self.folds[self.n_fold]
+            self.n_fold = self.n_fold + 1
+            start_date = df_train.iloc[-self.n_forecasts]["ds"]
+            config_fc = ConfigForecast(start_forecast=start_date, offset_event=None)
+            train, model = self.add_forecast(config_fc)
+            self.metrics_train = pd.concat(
+                [self.metrics_train, train[METRICS].iloc[-1]]
+            )
+        else:
+            raise Warning("K Folds finished")
 
     def add_forecast(self, config_forecast):
         # if isinstance(config_forecast, ConfigForecast) == False:
@@ -140,19 +171,28 @@ class NPw:
         )
 
         # Insert EQ cases
-        start_forecast_time = config_forecast.start_forecast
+        min_idx = np.argmin(
+            np.abs(self.input_df["ds"] - config_forecast.start_forecast)
+        )
+        start_forecast_time = self.input_df["ds"].iloc[min_idx]
         question_mark_start = start_forecast_time - self.config_npw.question_mark_length
         # Takes events up to that point
 
         base_df = self.input_l_df[
-            self.input_l_df["ds"]
-            < start_forecast_time + self.config_npw.forecast_length
+            (
+                self.input_l_df["ds"]
+                < start_forecast_time + self.config_npw.forecast_length
+            )
+            & (
+                self.input_l_df["ds"]
+                > start_forecast_time - self.config_npw.training_length
+            )
         ]
 
         n_samples = len(base_df)
         model = self.create_NP_model()
         # Remove all EQ after question_mark_start
-        dates_events = self.input_events["dates"]
+        dates_events = self.input_events.index
         mag_events = self.input_events["mag"]
         dist_events = self.input_events["dist"]
         current_events_dates = dates_events[dates_events < question_mark_start]
@@ -161,7 +201,7 @@ class NPw:
         if config_forecast.offset_event is not None:
             current_events_dates = pd.concat(
                 [
-                    current_events_dates,
+                    pd.Series(current_events_dates),
                     pd.Series(start_forecast_time + config_forecast.offset_event),
                 ]
             )
@@ -172,7 +212,7 @@ class NPw:
             current = df_with_events.set_index("ds")
         else:
             # Get anmes of event parameter
-            column_names = self.input_events.columns.drop("dates")
+            column_names = self.input_events.columns
             # Add all names to the model and create a df with dates event for every column
             [model, df_with_events] = self.add_events_neural_prophet(
                 model, base_df, column_names, current_events_dates
@@ -182,6 +222,7 @@ class NPw:
                 # Get the values of the column
                 current_column = self.input_events.loc[:, current_column_name]
                 # Select just the needed for this fc
+
                 column_events = current_column[dates_events < question_mark_start]
 
                 if config_forecast.offset_event is not None:
@@ -196,9 +237,11 @@ class NPw:
                 ):
                     current.loc[current_date, current_column_name] = current_event
                 df_with_events = current.reset_index()
-        
+        self.base_df = base_df
         df_train, df_test = model.split_df(df_with_events, valid_p=1, local_split=True)
         start_fc = config_forecast.start_forecast
+        self.df_test = df_test
+        self.df_train = df_train
         # Duration between all actual events and the start of the forecast
         dif_duration = np.asarray([event - start_fc for event in dates_events])
         # Lowest duration between all the actual events and the start of the forecast
@@ -213,12 +256,11 @@ class NPw:
             ]
         else:
             expected_event = None
-
         # Fit the model with df train
-        model = self.fit(model, df_train)
 
+        self.model, train_metrics = self.fit(model, df_train)
         # Compute just one long forecast
-        test_metrics = self.one_step_test(model, df_test)
+        test_metrics = self.one_step_test(model, start_forecast_time, df_test)
         self.npw_df.loc[model_name] = [
             config_forecast.start_forecast,
             n_samples,
@@ -229,22 +271,34 @@ class NPw:
             actual_event,
             expected_event,
         ]
-        return test_metrics
+        return train_metrics, model
+
+    def plot(self, model, df):
+        future = model.make_future_dataframe(
+            df, periods=60 // 5 * 24 * 7, n_historic_predictions=True
+        )
+        forecast = model.predict(future)
+        fig = model.plot(
+            forecast[forecast["ID"] == "noa1"]
+        )  # fig_comp = m.plot_components(forecast)
+        fig_param = model.plot_parameters()
 
     def add_events_neural_prophet(self, model, base_df, name_events, dates_event):
         # Create EQ dataframe
         df_complete = pd.DataFrame()
         for name_event in name_events:
-            current_df_events = pd.DataFrame({"event": name_event, "ds": dates_event,})
+            current_df_events = pd.DataFrame(
+                {
+                    "event": name_event,
+                    "ds": dates_event,
+                }
+            )
             df_complete = pd.concat([df_complete, current_df_events])
 
         model = model.add_events(list(name_events))
         df_with_events = model.create_df_with_events(base_df, df_complete)
 
         return [model, df_with_events]
-
-    def save_config(self):
-        return 0
 
     def save_df(self, filename):
         path = Path(filename + ".csv")
@@ -258,10 +312,12 @@ class NPw:
     def fit(self, model, df_train):
         if isinstance(self.config_npw, ConfigNPw):
             if self.config_npw.verbose == False:
-                model.fit(df_train, minimal=True)
+                train_metrics = model.fit(df_train, minimal=True)
             else:
-                model.fit(df_train, minimal=False)
-            return model
+                train_metrics = model.fit(df_train, minimal=False)
+            return model, train_metrics
+        else:
+            print("ERROR")
 
     def fit_models(self):
         # https://towardsdatascience.com/efficiently-iterating-over-rows-in-a-pandas-dataframe-7dd5f9992c01
@@ -282,36 +338,74 @@ class NPw:
         else:
             trainer_config = {}
 
+        if self.config_npw.multivariate_global:
+            global_local = "global"
+        else:
+            global_local = "local"
+
         model = NeuralProphet(
-            n_forecasts=int(self.config_npw.forecast_length / self.config_npw.freq),
-            growth="off",
-            daily_seasonality=True,
+            n_forecasts=self.n_forecasts,
+            daily_seasonality="auto",
+            # growth="discontinuous",
             yearly_seasonality=True,
+            changepoints_range=0.95,
+            # Number of potential trend changepoints to include.
+            # n_changepoints=300,
+            # Parameter modulating the flexibility of the automatic changepoint selection.
+            trend_reg=self.config_npw.regularization,
             weekly_seasonality=False,
-            n_lags=self.config_npw.n_lags,
+            n_lags=self.n_lags,
             num_hidden_layers=self.config_npw.num_hidden_layers,
             d_hidden=self.config_npw.d_hidden,
             learning_rate=self.config_npw.learning_rate,
             trainer_config=trainer_config,
-            trend_global_local="global",
-            season_global_local="global",
+            season_global_local=global_local,
+            trend_global_local=global_local,
             epochs=self.config_npw.epochs,
+            seasonality_mode="multiplicative",
+            impute_missing=True,
+            impute_rolling=24,
+            impute_linear=100,
+            drop_missing=self.config_npw.drop_missing,
         )
         model.set_plotting_backend("plotly")
         return model
 
-    def one_step_test(self, model, df_test):
-        future = model.make_future_dataframe(df_test, n_historic_predictions=0)
-        forecast = model.predict(future, decompose=False, raw=True)
-        y_predicted = forecast.filter(like="step").to_numpy()
-        y_actual = (
-            pd.pivot(df_test, index="ds", columns="ID", values="y")[-48:]
-            .transpose()
-            .to_numpy()
+    def one_step_test(self, model, start_forecast_time, df_test):
+        future = model.make_future_dataframe(
+            df_test, n_historic_predictions=self.n_forecasts
         )
-        RMSE = mean_squared_error(y_actual, y_predicted, squared=False)
-        MSE = mean_squared_error(y_actual, y_predicted)
-        MAE = mean_absolute_error(y_actual, y_predicted)
+        forecast = model.predict(future, decompose=False, raw=True)
+
+        forecast = forecast[forecast["ds"] == start_forecast_time].T
+
+        forecast = forecast.drop(["ds", "ID"]).reset_index().drop("index", axis=1)
+        print(forecast)
+        df_test = pd.pivot(df_test, index="ds", columns="ID", values="y")[
+            -(self.n_forecasts) :
+        ]
+        df_test = df_test.dropna(axis=1, how = "all")
+        print(df_test)
+        forecast.columns = df_test.columns + "_pred"
+        df_test.columns = df_test.columns + "_current"
+        # Improve with pd.concat keys
+        df_all = pd.concat([df_test.reset_index(), forecast], axis=1).drop("ds", axis=1)
+        df_all.columns = df_all.columns.str.split("_", expand=True)
+        df_all = df_all.swaplevel(axis=1)
+        print(df_all)
+        MSE = df_all["current"].sub(df_all["pred"]).pow(2).mean(axis=0)
+        RMSE = df_all["current"].sub(df_all["pred"]).pow(2).mean(axis=0).pow(1 / 2)
+        MAE = df_all["current"].sub(df_all["pred"]).abs().mean(axis=0)
+        # print(forecast.filter(like="step"))
+        # y_predicted = forecast.filter(like="step").to_numpy()
+        # y_actual = (
+        #     pd.pivot(df_test, index="ds", columns="ID", values="y")[-(self.n_forecasts):]
+        #     .transpose()
+        #     .to_numpy()
+        # )
+        # RMSE = mean_squared_error(y_actual, y_predicted, squared=False)
+        # MSE = mean_squared_error(y_actual, y_predicted)
+        # MAE = mean_absolute_error(y_actual, y_predicted)
         print("MSE: " + str(MSE))
         return {"RMSE": RMSE, "MSE": MSE, "MAE": MAE}
 
@@ -383,14 +477,14 @@ class NPw:
         return df_pre
 
     def get_binary_perform_fast(self, df, min_limit, max_limit, config_events=None):
-        
+
         if config_events == None:
             events_df_dates = self.input_events["dates"]
         else:
             events_df_dates = self.get_events(config_events)["dates"]
         if len(events_df_dates) == 0:
             return [np.zeros(len(df["predicted_class"].unique()) + 1), None]
-         
+
         # Diference between events and each row in seconds
         dif = [
             (
@@ -650,19 +744,27 @@ class NPw:
                 self.npw_df.at[index, "test_metrics"] = mean_squared_error(
                     y_actual, y_predicted
                 )
+
     @staticmethod
     def save_config(config_path, config_npw, config_events):
-        config_npw_json = json.dumps([asdict(config_npw), asdict(config_events)], indent=4, sort_keys=True, default=str)
+        config_npw_json = json.dumps(
+            [asdict(config_npw), asdict(config_events)],
+            indent=4,
+            sort_keys=True,
+            default=str,
+        )
         with open(config_path, "w") as outfile:
             outfile.write(config_npw_json)
+
     @staticmethod
     def load_config(path):
         with open("sample.json", "r") as infile:
-            data=infile.read();
-            data=json.loads(data)
+            data = infile.read()
+            data = json.loads(data)
         config_npw = ConfigNPw(**data[0])
         config_events = ConfigEQ(**data[1])
-        return (config_npw, config_events)       
+        return (config_npw, config_events)
+
     @staticmethod
     def load_class(filename):
         with open(filename + ".pkl", "rb") as f:

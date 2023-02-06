@@ -81,7 +81,7 @@ print("Number of arguments:", len(sys.argv), "arguments.")
 print("Argument List:", str(sys.argv))
 
 print(sys.argv[1])
-index = sys.argv[1]
+index = int(sys.argv[1])
 start_day = datetime.fromisoformat("2017-01-01T10:00:00")
 start_date = start_day + index * relativedelta(months=+1)
 NPw_o = NPw(config_npw, df_regressor, config_events)
