@@ -14,11 +14,12 @@ import os
 from pathlib import Path
 from enum import Enum
 
+import warnings
 from IPython.display import display
 from IPython.core.display import HTML
 import json
 
-
+from sdv.tabular import GaussianCopula
 class EventFC(Enum):
     NP = 0
 
@@ -42,6 +43,7 @@ class ConfigNPw:
     training_length: pd.Timedelta
     normalization: bool
     regularization: float
+
 
     def __post_init__(self):
         self.forecast_length = pd.Timedelta(self.forecast_length)
@@ -108,6 +110,7 @@ class NPw:
         self.input_l_df = multivariate_df(df)
         self.config_events = config_events
         self.input_events, self.transform = self.get_events(self.config_events)
+        self.synthetic_events = self.get_synthetic_events()
         self.npw_df = pd.DataFrame(columns=self.NPw_columns)
         self.n_forecasts = int(self.config_npw.forecast_length / self.config_npw.freq)
         self.n_lags = int(self.config_npw.historic_lenght / self.config_npw.freq)
@@ -115,7 +118,21 @@ class NPw:
         self.metrics_train = pd.DataFrame(columns=METRICS)
         self.folds = list()
         self.n_fold = 0
+        self.list_keys_fold = list()
+        self.list_test_RMSE = list()
 
+        self.list_test_MAE = list()
+    def get_synthetic_events (self):
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            model = GaussianCopula()
+            model.fit(self.input_events)
+            synthetic_events = pd.DataFrame()
+            pre_synthetic_events = model.sample(100)
+            for column_name in self.input_events.columns:
+                synthetic_events = pd.concat([synthetic_events, pre_synthetic_events.nlargest(1, column_name)])
+                
+        return synthetic_events 
     def get_events(self, config_event):
         if True:  # isinstance(config_event, ConfigEQ):
             events = prepare_eq(
@@ -131,9 +148,8 @@ class NPw:
             raise TypeError("The configuration file is not valid")
         return events
 
-    def get_folds(self, k=5, fold_pct=0.10, fold_overlap_pct=0.5):
+    def get_folds(self, k=5):
         if self.config_npw.type == EventFC.NP:
-            model = self.create_NP_model()
             self.folds = list()
             # Own fold method
             start_folds = int(self.config_npw.training_length / self.config_npw.freq)
@@ -145,18 +161,18 @@ class NPw:
             self.n_fold = 0
 
     def process_fold(self, index_fold):
-        if self.n_fold < len(self.folds):
-            df_train = self.folds[self.n_fold]
-            self.n_fold = self.n_fold + 1
+        if index_fold < len(self.folds):
+            df_train = self.folds[index_fold]
             start_date = df_train.iloc[-self.n_forecasts]["ds"]
             config_fc = ConfigForecast(start_forecast=start_date, offset_event=None)
-            train, model = self.add_forecast(config_fc)
-            self.metrics_train = pd.concat(
-                [self.metrics_train, train[METRICS].iloc[-1]]
-            )
+            df_RMSE, df_MAE = self.add_forecast(config_fc)
+            self.list_keys_fold.append(start_date)
+            self.list_test_RMSE.append(df_RMSE)
+            self.list_test_MAE.append(df_MAE) 
         else:
             raise Warning("K Folds finished")
-
+    def get_results(self):
+        return pd.concat(self.list_test_RMSE, keys = self.list_keys_fold)
     def add_forecast(self, config_forecast):
         # if isinstance(config_forecast, ConfigForecast) == False:
         #        raise TypeError("Only ConfigForecast are allowed")
@@ -193,18 +209,20 @@ class NPw:
         model = self.create_NP_model()
         # Remove all EQ after question_mark_start
         dates_events = self.input_events.index
-        mag_events = self.input_events["mag"]
-        dist_events = self.input_events["dist"]
-        current_events_dates = dates_events[dates_events < question_mark_start]
+        # Push event fordware forecast time
+        current_events_dates = dates_events + self.config_npw.forecast_length
+        # Take the events until the forecast time
+        current_events_dates = current_events_dates[current_events_dates < start_forecast_time]
 
-        # Insert with negative offset
-        if config_forecast.offset_event is not None:
-            current_events_dates = pd.concat(
-                [
-                    pd.Series(current_events_dates),
-                    pd.Series(start_forecast_time + config_forecast.offset_event),
-                ]
-            )
+        # # Insert with negative offset
+        # if config_forecast.offset_event is not None:
+        #     current_events_dates = pd.concat(
+        #         [
+        #             pd.Series(current_events_dates),
+        #             # Put an extra event in the forecast time
+        #             pd.Series(start_forecast_time + config_forecast.offset_event),
+        #         ]
+        #     )
         if self.config_npw.binary_event:
             [model, df_with_events] = self.add_events_neural_prophet(
                 model, base_df, ["EV"], current_events_dates
@@ -225,10 +243,10 @@ class NPw:
 
                 column_events = current_column[dates_events < question_mark_start]
 
-                if config_forecast.offset_event is not None:
-                    column_events = pd.concat(
-                        [column_events, pd.Series(np.mean(column_events))]
-                    )
+                # if config_forecast.offset_event is not None:
+                #     column_events = pd.concat(
+                #         [column_events, pd.Series(np.mean(column_events))]
+                #     )
                 # convert datetime to index of the df
                 current = df_with_events.set_index("ds")
                 # For each column name
@@ -260,18 +278,15 @@ class NPw:
 
         self.model, train_metrics = self.fit(model, df_train)
         # Compute just one long forecast
-        test_metrics = self.one_step_test(model, start_forecast_time, df_test)
-        self.npw_df.loc[model_name] = [
-            config_forecast.start_forecast,
-            n_samples,
-            config_forecast.offset_event,
-            test_metrics["RMSE"],
-            test_metrics["MSE"],
-            test_metrics["MAE"],
-            actual_event,
-            expected_event,
-        ]
-        return train_metrics, model
+        df_RMSE, df_MAE= self.test(model, start_forecast_time, df_test)
+        # self.npw_df.loc[model_name] = [
+        #     config_forecast.start_forecast,
+        #     n_samples,
+        #     config_forecast.offset_event,
+        #     actual_event,
+        #     expected_event,
+        # ]
+        return df_RMSE, df_MAE
 
     def plot(self, model, df):
         future = model.make_future_dataframe(
@@ -370,8 +385,41 @@ class NPw:
         )
         model.set_plotting_backend("plotly")
         return model
-
+    def test(self, model, start_forecast_time, df_test):
+        # Without events:
+        periods = 5
+        df_results_RMSE = pd.DataFrame()
+        df_results_MAE = pd.DataFrame()
+        list_synthetic_RMSE = list()
+        list_keys= list()
+        df_RMSE, df_MAE = self.one_step_test(model, start_forecast_time, df_test)
+        list_keys.append("BASE")
+        list_synthetic_RMSE.append(df_RMSE)
+        df_results_MAE = pd.concat([df_results_MAE, df_MAE])
+        for idx, synthetic_event in self.synthetic_events.iterrows():
+            # dt_events = pd.date_range(start = start_forecast_time, end = start_forecast_time + self.config_npw.forecast_length, periods = 5).values
+            # To homogenize the dates in the CSV
+            # dt_events = pd.date_range(start = 0, end = self.config_npw.forecast_length, periods = periods).values
+            event_offset = [self.config_npw.forecast_length / (periods + 1)* x for x in range(1, periods + 1)]
+            df_dt  = pd.DataFrame()
+            for dt in event_offset:
+                current_df_test = df_test.copy()
+                unique_dates = current_df_test["ds"].unique()
+                closest_date = unique_dates[np.abs(unique_dates - (start_forecast_time +dt).to_numpy()).argmin()]
+                idx_closest = current_df_test.index[current_df_test["ds"] == closest_date]
+                for synthetic_var in synthetic_event.index:
+                    current_df_test.loc[idx_closest, synthetic_var] = synthetic_event[synthetic_var]
+                df_RMSE, df_MAE = self.one_step_test(model, start_forecast_time, current_df_test)
+                df_RMSE = df_RMSE.rename(str(dt.total_seconds()))#pd.to_datetime(str()).strftime("%m/%d/%Y, %H:%M:%S"))
+                df_MAE.columns = [str(closest_date)]
+                df_dt = pd.concat([df_dt, df_RMSE], axis = 1)
+                df_results_MAE = pd.concat([df_results_MAE, df_MAE], axis = 1)
+            list_synthetic_RMSE.append(df_dt)
+            list_keys.append("SYNT" + str(idx))
+        df_results_RMSE = pd.concat(list_synthetic_RMSE, axis = 1, keys = list_keys)
+        return df_results_RMSE, df_results_MAE 
     def one_step_test(self, model, start_forecast_time, df_test):
+
         future = model.make_future_dataframe(
             df_test, n_historic_predictions=self.n_forecasts
         )
@@ -380,35 +428,19 @@ class NPw:
         forecast = forecast[forecast["ds"] == start_forecast_time].T
 
         forecast = forecast.drop(["ds", "ID"]).reset_index().drop("index", axis=1)
-        print(forecast)
         df_test = pd.pivot(df_test, index="ds", columns="ID", values="y")[
             -(self.n_forecasts) :
         ]
         df_test = df_test.dropna(axis=1, how = "all")
-        print(df_test)
         forecast.columns = df_test.columns + "_pred"
         df_test.columns = df_test.columns + "_current"
         # Improve with pd.concat keys
         df_all = pd.concat([df_test.reset_index(), forecast], axis=1).drop("ds", axis=1)
         df_all.columns = df_all.columns.str.split("_", expand=True)
         df_all = df_all.swaplevel(axis=1)
-        print(df_all)
-        MSE = df_all["current"].sub(df_all["pred"]).pow(2).mean(axis=0)
         RMSE = df_all["current"].sub(df_all["pred"]).pow(2).mean(axis=0).pow(1 / 2)
         MAE = df_all["current"].sub(df_all["pred"]).abs().mean(axis=0)
-        # print(forecast.filter(like="step"))
-        # y_predicted = forecast.filter(like="step").to_numpy()
-        # y_actual = (
-        #     pd.pivot(df_test, index="ds", columns="ID", values="y")[-(self.n_forecasts):]
-        #     .transpose()
-        #     .to_numpy()
-        # )
-        # RMSE = mean_squared_error(y_actual, y_predicted, squared=False)
-        # MSE = mean_squared_error(y_actual, y_predicted)
-        # MAE = mean_absolute_error(y_actual, y_predicted)
-        print("MSE: " + str(MSE))
-        return {"RMSE": RMSE, "MSE": MSE, "MAE": MAE}
-
+        return pd.Series(RMSE.squeeze()), MAE
     # Predict for differents hours offset and differents event offset
     def predict_with_offset_hours(self, start_day, hours_offsets, event_offsets):
         for hours_offset in hours_offsets:
@@ -830,4 +862,4 @@ class NPw:
                 "n_classes": n_classes,
             }
             df_output = pd.concat([df_output, pd.DataFrame.from_dict([dict_output])])
-        return df_output
+        return df_oup

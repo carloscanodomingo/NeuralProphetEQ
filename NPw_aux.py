@@ -111,9 +111,9 @@ def process_eq(df_events, station_names, freq):
     ).drop("bazi", axis=1)
     # Km
     df_events["dist"] = df_eq_results["dist"].values / 1000
-    df_events["arc_cos"] = np.abs(np.cos(np.deg2rad(df_eq_results["azimuth"].values)))
+    df_events["arc_cos"] = np.abs(np.cos(np.deg2rad(90 + df_eq_results["azimuth"].values)))
     df_events["arc_sin"] = np.abs(
-        np.sin(np.deg2rad(90 - df_eq_results["azimuth"].values))
+        np.sin(np.deg2rad(90 + df_eq_results["azimuth"].values))
     )
     df_events["pr"] = get_pr(df_events, d1_base, d2_base, m1_base, m2_base)
     # Resample and select the EQ with the lowest value of PR
@@ -137,8 +137,14 @@ def process_eq(df_events, station_names, freq):
 
     # Order by standar
     return df_events
-
-
+"""
+class CustomMinMax(MinMaxScaler):
+    def __init__(self, **kwargs):
+        super.__init__(**kwargs)
+    def transform(self, X, y=None):
+        X["dist"] = 
+        transformed_X = super().transform(X)
+"""
 def prepare_eq(
     df_events,
     dist_start,
@@ -155,10 +161,14 @@ def prepare_eq(
     df_events["pr"] = get_pr(df_events, d1, d2, m1, m2)
     if filter == 1:
         df_events = df_events.loc[df_events["pr"] > 1]
+    df_events_copy = df_events.copy()
+    df_events_copy["depth"] =  - df_events["depth"]
+    df_events_copy["dist"] =  - df_events["dist"]
     scaler = MinMaxScaler()
-    arr_scaled = scaler.fit_transform(df_events)
+
+    arr_scaled = scaler.fit_transform(df_events_copy)
     df_scaled = pd.DataFrame(
-        arr_scaled, columns=df_events.columns, index=df_events.index
+        arr_scaled, columns=df_events_copy.columns, index=df_events_copy.index
     )
     return df_scaled, scaler
 
@@ -189,6 +199,5 @@ def prepare_ion_data(site, freq):
     df_eq = read_EQ_data(eq_path)
     df_eq = process_eq(df_eq, station_names=station_names, freq=freq)
     return df_ion, df_eq
-
 
 # read_iono_data(["noa1"])
