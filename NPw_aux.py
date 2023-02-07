@@ -6,6 +6,7 @@ import dateutil.parser
 import pyproj
 from sklearn.preprocessing import MinMaxScaler
 from scipy import stats
+
 start_day = "2016-01-01"
 end_day = "2021-01-01"
 freq = timedelta(hours=1)
@@ -111,7 +112,9 @@ def process_eq(df_events, station_names, freq):
     ).drop("bazi", axis=1)
     # Km
     df_events["dist"] = df_eq_results["dist"].values / 1000
-    df_events["arc_cos"] = np.abs(np.cos(np.deg2rad(90 + df_eq_results["azimuth"].values)))
+    df_events["arc_cos"] = np.abs(
+        np.cos(np.deg2rad(90 + df_eq_results["azimuth"].values))
+    )
     df_events["arc_sin"] = np.abs(
         np.sin(np.deg2rad(90 + df_eq_results["azimuth"].values))
     )
@@ -137,6 +140,8 @@ def process_eq(df_events, station_names, freq):
 
     # Order by standar
     return df_events
+
+
 """
 class CustomMinMax(MinMaxScaler):
     def __init__(self, **kwargs):
@@ -145,6 +150,8 @@ class CustomMinMax(MinMaxScaler):
         X["dist"] = 
         transformed_X = super().transform(X)
 """
+
+
 def prepare_eq(
     df_events,
     dist_start,
@@ -152,6 +159,7 @@ def prepare_eq(
     mag_start,
     mag_delta,
     filter,
+    drop,
 ):
     m1 = mag_start
     m2 = m1 + mag_delta
@@ -162,16 +170,19 @@ def prepare_eq(
     if filter == 1:
         df_events = df_events.loc[df_events["pr"] > 1]
     df_events_copy = df_events.copy()
-    df_events_copy["depth"] =  - df_events["depth"]
-    df_events_copy["dist"] =  - df_events["dist"]
+    df_events_copy["depth"] = -df_events["depth"]
+    df_events_copy["dist"] = -df_events["dist"]
     scaler = MinMaxScaler()
-
-    arr_scaled = scaler.fit_transform(df_events_copy)
-    df_scaled = pd.DataFrame(
-        arr_scaled, columns=df_events_copy.columns, index=df_events_copy.index
-    )
-    return df_scaled, scaler
-
+    df_scaled = drop_scale(df_events_copy, scaler, drop)
+    return (df_scaled, scaler, df_events)
+def drop_scale(df, scaler, drop):
+    if drop:
+           df= df.drop(drop, axis = 1)     
+    arr_scaled = scaler.fit_transform(df)
+    df = pd.DataFrame(
+        arr_scaled, columns=df.columns, index=df.index
+    )   
+    return df
 
 def get_pr(df, d1, d2, m1, m2):
     (A, B) = get_coef(d1, d2, m1, m2)
@@ -187,9 +198,11 @@ def get_coef(d1, d2, m1, m2):
     B = np.log10(d1) - A * m1
     return (A, B)
 
+
 def remove_outliers(df, max_z):
-    z_score = stats.zscore(df, nan_policy = "omit")
+    z_score = stats.zscore(df, nan_policy="omit")
     df[(np.abs(z_score) > max_z)] = np.NaN
+
 
 def prepare_ion_data(site, freq):
     df_stations = pd.read_csv(station_list_path)
@@ -199,5 +212,6 @@ def prepare_ion_data(site, freq):
     df_eq = read_EQ_data(eq_path)
     df_eq = process_eq(df_eq, station_names=station_names, freq=freq)
     return df_ion, df_eq
+
 
 # read_iono_data(["noa1"])
