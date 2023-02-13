@@ -39,7 +39,7 @@ def process_ionosphere_files():
         )
 
 
-def read_iono_data(station_list, freq):
+def read_iono_data(station_list):
     stations_files = Path(data_path + station_path).glob("*.csv")
     # print(list(stations_files))
     list_stations = [
@@ -55,6 +55,9 @@ def read_iono_data(station_list, freq):
         current_df = current_df.set_index("dates").sort_index()
         df = pd.merge(df, current_df, how="outer", left_index=True, right_index=True)
     df.index.names = ["ds"]
+    return df
+def process_input_data(df, freq, type = None):
+
     df = df.resample(rule=freq).mean()
     df.drop(df.index[-1], inplace=True)
 
@@ -85,7 +88,8 @@ def read_EQ_data(dir_path):
         .sort_index()
     )
     all_pd.index.names = ["dates"]
-
+    # Remove NaN interpolate
+    all_pd = all_pd.interpolate(method = "from_derivatives")
     return all_pd
 
 
@@ -175,6 +179,7 @@ def prepare_eq(
     scaler = MinMaxScaler()
     df_scaled = drop_scale(df_events_copy, scaler, drop)
     return (df_scaled, scaler, df_events)
+
 def drop_scale(df, scaler, drop):
     if drop:
            df= df.drop(drop, axis = 1)     
@@ -204,11 +209,22 @@ def remove_outliers(df, max_z):
     df[(np.abs(z_score) > max_z)] = np.NaN
 
 
-def prepare_ion_data(site, freq):
+def prepare_ion_data(site, freq, type = "complete"):
     df_stations = pd.read_csv(station_list_path)
     station_names = list((df_stations[df_stations["site"] == site])["station_id"])
-    df_ion = read_iono_data(station_names, freq)
-    print(eq_path)
+    df_ion = read_iono_data(station_names)
+    if type == "hourly":
+        if pd.Timedelta(freq) < pd.Timedelta(days = 1):
+            raise KeyError("Freq has to be greater than 1d")
+        df_ion["hour"] = df_ion.index.hour
+        pd_df_ion_hour = pd.DataFrame()
+        query_hour = "hour == {hour}"
+        for hour in df_ion.index.hour.unique():
+            current_df_ion_hour = df_ion.query(query_hour.format(hour = hour)).drop("hour", axis=1).resample(rule="1d").mean()
+            current_df_ion_hour.columns = current_df_ion_hour.columns + "_" + str(hour)
+            pd_df_ion_hour = pd.concat([pd_df_ion_hour, current_df_ion_hour], axis = 1)
+        df_ion = pd_df_ion_hour
+    df_ion = process_input_data(df_ion, freq)
     df_eq = read_EQ_data(eq_path)
     df_eq = process_eq(df_eq, station_names=station_names, freq=freq)
     return df_ion, df_eq
