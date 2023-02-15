@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import timedelta, datetime
 import pandas as pd
 from pathlib import Path
 import numpy as np
@@ -11,10 +11,12 @@ start_day = "2016-01-01"
 end_day = "2021-01-01"
 freq = timedelta(hours=1)
 station_path = "stations/"
-data_path = str(Path.home()) + "/data/ion/"
+GNSSTEC_path = "GNSSTEC/"
 station_list_path = "station_list.csv"
-eq_path = str(Path.home()) + "/data/EQ/"
-
+irradiance_path = "irradiance.csv"
+eq_path = "EQ/"
+stations_path = "stations/"
+ion_path = "ion/ionosphere_parameters_data.txt"
 # ToDO the problem is that the currrent algorithm to reduce de number of EQ is based on PR and last too much,
 # it would be better to process in the first step usign a base pr criteria and them calculate the real PR
 # For each config event.
@@ -24,8 +26,8 @@ d1_base = 2000
 d2_base = 2500
 
 
-def process_ionosphere_files():
-    station_names = Path(data_path + "raw/").glob("*/")
+def process_GNSSTEC_files(path_to_raw_files):
+    station_names = Path(path_to_raw_files).glob("*/")
     for station in station_names:
         p = station.rglob("*")
         files = [x for x in p if x.is_file()]
@@ -35,42 +37,51 @@ def process_ionosphere_files():
             current_df = pd.concat([current_df, pd.read_csv((file), compression="xz")])
             number = number + 1
         current_df.rename(columns={"tec": station.name}).set_index("dates").to_csv(
-            str(station) + ".csv"
+            str(station) + ".csv.xz", compression="xz"
         )
 
+def get_station_names(path_to_stations, site):
+    df_stations = pd.read_csv(path_to_stations + "/" + "station_list.csv")
+    station_names = list((df_stations[df_stations["site"] == site])["station_id"])
+    # Read all the station available:
+    df_stations = df_stations.set_index("station_id")
+    # Compute the mean lat and long of th eselected stations ToDo: Improve this aspect
+    mean_location = df_stations.loc[station_names].describe().loc["mean"]
+    return station_names, mean_location
 
-def read_iono_data(station_list):
-    stations_files = Path(data_path + station_path).glob("*.csv")
-    # print(list(stations_files))
+def read_GNSSTEC_data(path_to_tec, station_names):
+  
+    stations_files = Path(path_to_tec).glob("*.csv.xz")
     list_stations = [
         station
         for station in stations_files
-        if any(x in station.name for x in station_list)
+        if any(x in station.name for x in station_names)
     ]
     ds = pd.date_range(start=start_day, end=end_day, freq="30s")
     df = pd.DataFrame({"dates": ds}).set_index("dates")
     for station in list_stations:
-        current_df = pd.read_csv(station)
+        current_df = pd.read_csv(station, compression="xz")
         current_df["dates"] = pd.to_datetime(current_df["dates"])
         current_df = current_df.set_index("dates").sort_index()
         df = pd.merge(df, current_df, how="outer", left_index=True, right_index=True)
     df.index.names = ["ds"]
     return df
-def process_input_data(df, freq, type = None):
+
+
+def process_input_data(df, freq, type=None):
 
     df = df.resample(rule=freq).mean()
     df.drop(df.index[-1], inplace=True)
 
     return df
 
-
+    
 def read_EQ_data(dir_path):
     p = Path(dir_path).glob("*.csv")
     all_pd = pd.DataFrame()
 
     valid_colums = ["time", "longitude", "latitude", "depth", "mag", "type"]
     for file in p:
-        print(file)
         all_pd = pd.concat(
             [
                 all_pd,
@@ -89,20 +100,17 @@ def read_EQ_data(dir_path):
     )
     all_pd.index.names = ["dates"]
     # Remove NaN interpolate
-    all_pd = all_pd.interpolate(method = "from_derivatives")
+    all_pd = all_pd.interpolate(method="from_derivatives")
     return all_pd
 
 
 ""
 
 
-def process_eq(df_events, station_names, freq):
+def process_eq(df_events, station_names, mean_location,  freq):
     # Create geodesic object to compute dist and azimuth
     geodesic = pyproj.Geod(ellps="WGS84")
-    # Read all the station available:
-    df_stations = pd.read_csv(station_list_path).set_index("station_id")
-    # Compute the mean lat and long of th eselected stations ToDo: Improve this aspect
-    mean_location = df_stations.loc[station_names].describe().loc["mean"]
+
     # To reduce the number of EQ and also the time for computing
     # lambda function to get the azimuth and dist
     f_geo = lambda x: geodesic.inv(
@@ -180,14 +188,14 @@ def prepare_eq(
     df_scaled = drop_scale(df_events_copy, scaler, drop)
     return (df_scaled, scaler, df_events)
 
+
 def drop_scale(df, scaler, drop):
     if drop:
-           df= df.drop(drop, axis = 1)     
+        df = df.drop(drop, axis=1)
     arr_scaled = scaler.fit_transform(df)
-    df = pd.DataFrame(
-        arr_scaled, columns=df.columns, index=df.index
-    )   
+    df = pd.DataFrame(arr_scaled, columns=df.columns, index=df.index)
     return df
+
 
 def get_pr(df, d1, d2, m1, m2):
     (A, B) = get_coef(d1, d2, m1, m2)
@@ -207,27 +215,87 @@ def get_coef(d1, d2, m1, m2):
 def remove_outliers(df, max_z):
     z_score = stats.zscore(df, nan_policy="omit")
     df[(np.abs(z_score) > max_z)] = np.NaN
+    
+    
+def read_ion_data(path_ion):
+    widths = [4, 4, 3, 3, 6, 6, 6 ,6, 6, 6, 9, 6, 6, 6, 6, 6, 6, 6, 5, 7, 3, 4, 6, 4, 6, 5, 6, 6, 6, 9, 9, 9, 9, 3]
+    ion_data = pd.read_fwf(path_ion, widths = widths, header=None)
+    id_ion = ["year", "doy", "hour", "id imf", "B scalar", "B vector", "Lat B", "Long B", "BY", "Bz", "SW Plasma Ta", "SW Proton", "SW Plasma Speed", "SW Plasma flow long", "SW Plasma Speed lat", "Alpha ratio", "Flow pressure", "Alfen", "Magneto", "Quasy", "Kp", "N sunspot", "Dst-index", "Ap index", "f107", "AE", "AL", "AU", "pc", "lyman", "Proton10", "Proton30", "Proton60", "Flux" ]
+    ion_data.columns = id_ion
+    strfmt = "{year}-{doy:0=3d}T{hour:0=2d}:00:00"
 
+    ion_data["datetime"] = ion_data.apply(lambda x: datetime.strptime(strfmt.format(year = int(x["year"]), doy = int(x["doy"]), hour = int(x["hour"])),"%Y-%jT%H:%M:%S"), axis = 1)
+    
+    df_ion = ion_data.drop(["year", "doy", "hour"], axis = 1).set_index("datetime")
+    return df_ion
 
-def prepare_ion_data(site, freq, type = "complete"):
-    df_stations = pd.read_csv(station_list_path)
-    station_names = list((df_stations[df_stations["site"] == site])["station_id"])
-    df_ion = read_iono_data(station_names)
+def read_irradiance_data(path_data, site):
+    df_irradiance = pd.read_csv(path_data + stations_path + irradiance_path, parse_dates=["time"], date_parser=dateutil.parser.parse).set_index("time")
+    df_irradiance = pd.DataFrame(df_irradiance[site])
+    df_irradiance.index = df_irradiance.index.tz_convert(None)
+    
+    return df_irradiance
+def prepare_ion_data(path_data, site, freq, type="complete"):
+    station_names, mean_location = get_station_names(path_data + stations_path, site)
+    df_GNSSTEC = read_GNSSTEC_data(path_data + GNSSTEC_path, station_names)
+    # Not very useful since it has to be related to the hour of the sun
     if type == "hourly":
-        if pd.Timedelta(freq) < pd.Timedelta(days = 1):
+        if pd.Timedelta(freq) < pd.Timedelta(days=1):
             raise KeyError("Freq has to be greater than 1d")
-        df_ion["hour"] = df_ion.index.hour
+        df_GNSSTEC["hour"] = df_GNSSTEC.index.hour
         pd_df_ion_hour = pd.DataFrame()
         query_hour = "hour == {hour}"
-        for hour in df_ion.index.hour.unique():
-            current_df_ion_hour = df_ion.query(query_hour.format(hour = hour)).drop("hour", axis=1).resample(rule="1d").mean()
+        for hour in df_GNSSTEC.index.hour.unique():
+            current_df_ion_hour = (
+                df_GNSSTEC.query(query_hour.format(hour=hour))
+                .drop("hour", axis=1)
+                .resample(rule="1d")
+                .mean()
+            )
             current_df_ion_hour.columns = current_df_ion_hour.columns + "_" + str(hour)
-            pd_df_ion_hour = pd.concat([pd_df_ion_hour, current_df_ion_hour], axis = 1)
-        df_ion = pd_df_ion_hour
-    df_ion = process_input_data(df_ion, freq)
-    df_eq = read_EQ_data(eq_path)
-    df_eq = process_eq(df_eq, station_names=station_names, freq=freq)
-    return df_ion, df_eq
+            pd_df_ion_hour = pd.concat([pd_df_ion_hour, current_df_ion_hour], axis=1)
+        df_GNSSTEC = pd_df_ion_hour
+        
+        
+    
+    df_GNSSTEC = process_input_data(df_GNSSTEC, freq)
+    remove_outliers(df_GNSSTEC, 4)
+    remove_outliers(df_GNSSTEC, 4)
+    df_GNSSTEC = df_GNSSTEC.interpolate(metrod = "from_derivatives")
+    
+    df_ion = read_ion_data(path_data + ion_path)
+    df_ion = df_ion[["Kp", "f107", "N sunspot"]]
+    df_ion = df_ion.resample(rule = freq).ffill()
+    df_ion.index.names = ['ds']
+
+    df_irradiance =  read_irradiance_data(path_data, site)
+    df_irradiance.index.names = ['ds']
+    df_eq = read_EQ_data(path_data + eq_path)
+    df_eq = process_eq(df_eq, station_names=station_names, mean_location= mean_location, freq=freq)
+    df_covariate = pd.merge(df_irradiance, df_ion, left_index=True, right_index=True, how='outer')
+    df_covariate = df_covariate.interpolate(metrod = "from_derivatives")
+    
+    return df_GNSSTEC,df_covariate, df_eq
 
 
 # read_iono_data(["noa1"])
+
+"""
+import pvlib
+import pandas as pd
+
+data, inputs, meta = pvlib.iotools.get_pvgis_hourly(
+    latitude=39.5, # North is positive
+    longitude=23, # East is positive
+    start=pd.Timestamp('2016-01-01'), # First available year is 2005
+    end=pd.Timestamp('2020-12-31'), # Last available year is 2020 (depends on database)
+    raddatabase='PVGIS-SARAH2',
+    surface_tilt=0, # surface tilt angle
+    surface_azimuth=0, # 0 degrees corresponds to south
+    components=True, # Whether you want the individual components or just the total
+    url='https://re.jrc.ec.europa.eu/api/v5_2/', # URL for version 5.2
+    )
+
+data[['poa_direct','poa_sky_diffuse','poa_ground_diffuse']].plot(
+    figsize=(6,4), subplots=True, sharex=True)
+"""

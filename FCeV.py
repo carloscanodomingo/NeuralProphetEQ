@@ -23,23 +23,12 @@ import json
 from sdv.tabular import GaussianCopula
 
 
-class EventFC(Enum):
-    NP = 0
-
-
 @dataclass
-class ConfigNPw:
-    type = EventFC.NP
-    forecast_length: pd.Timedelta
-    question_mark_length: pd.Timedelta
-    freq: pd.Timedelta
-    training_length: pd.Timedelta
-    learning_rate: float
-    historic_lenght: pd.Timedelta
+class NeuralProphet_config:
     d_hidden: int
     num_hidden_layers: int
-    yearly_seasonality:  bool
-    daily_seasonality:  bool
+    yearly_seasonality: bool
+    daily_seasonality: bool
     weekly_seasonality: bool
     seasonal_mode: Literal["additive", "multiplicative"]
     seasonal_reg: float
@@ -47,12 +36,10 @@ class ConfigNPw:
     multivariate_trend: bool
     verbose: bool
     epochs: int
-    use_gpu: bool
     drop_missing: bool
     impute_missing = True
     impute_linear = 48
     impute_rolling = 48
-    event_type: Literal["None", "Binary", "Non-Binary"]
     normalization: bool
     event_mode: Literal["additive", "multiplicative"]
     growth: Literal["off", "Lineal"]
@@ -61,28 +48,28 @@ class ConfigNPw:
     sparce_AR: float
     loss_func: Literal["Huber", "MSE", "MAE", "L1-Loss", "kl_div"]
 
+
+class FCeV_type(Enum):
+    NeuralProphet = (0,)
+    Darts_TCN = 1
+    Darts_TFT = (2,)
+
+
+@dataclass
+class FCeVConfig:
+    type = FCeV_type.NeuralProphet
+    forecast_length: pd.Timedelta
+    question_mark_length: pd.Timedelta
+    end_date_train: datetime
+    end_date_val: datetime
+    learning_rate: float
+    ts_duration: pd.Timedelta
+    use_gpu: bool
+    event_type: Literal["None", "Binary", "Non-Binary"]
+
     def __post_init__(self):
         self.forecast_length = pd.Timedelta(self.forecast_length)
-        self.historic_lenght = pd.Timedelta(self.historic_lenght)
-        self.freq = pd.Timedelta(self.freq)
         self.question_mark_length = pd.Timedelta(self.question_mark_length)
-        self.training_length = pd.Timedelta(self.training_length)
-
-
-@dataclass
-class ConfigEQ:
-    dist_start: int
-    dist_delta: int
-    mag_start: float
-    mag_delta: float
-    filter: bool
-    drop: list
-
-
-@dataclass
-class ConfigForecast:
-    start_forecast: datetime
-    offset_event: timedelta
 
 
 # Convert from wide format to long format df
@@ -105,89 +92,62 @@ def multivariate_df(df):
 METRICS = ["MAE", "RMSE"]
 
 
-class NPw:
-    def __init__(self, config_npw, df, config_events, df_events, synthetic_events = pd.DataFrame()):
-        self.NPw_columns = [
-            "start_forecast",
-            "n_samples",
-            "offset_model",
-            "RMSE",
-            "MSE",
-            "MAE",
-            "actual_event",
-            "expected_event",
-        ]
-        self.config_npw = config_npw
-        self.df_events = df_events
+class FCeV:
+    def __init__(
+        self,
+        FCev_config,
+        input_series,
+        past_covariates,
+        future_covariates,
+        events_ts,
+        synthetic_events=pd.DataFrame(),
+    ):
+
+        self.FCev_config = FCev_config
+        self.input_series = input_series
+        self.past_covariates = past_covariates
+        self.future_covariates = future_covariates
+        self.events_ts = events_ts
+        self.synthetic_events = synthetic_events
         # Convert from wide format to long format
-        self.input_df = df
-        self.name = get_random_name(
-            separator="_", combo=[COLORS, ANIMALS], style="lowercase"
-        )
-        self.input_l_df = multivariate_df(self.input_df)
-        self.config_events = config_events
-        self.input_events, self.transform, self.input_events_filtered = self.get_events(self.config_events)
         if synthetic_events.empty:
-            self.synthetic_events = self.get_synthetic_events()
+            self.synthetic_events = None  # self.get_synthetic_events()
         else:
-            self.synthetic_events = drop_scale(synthetic_events, self.transform, self.config_events.drop)
-        self.npw_df = pd.DataFrame(columns=self.NPw_columns)
-        self.n_forecasts = int(self.config_npw.forecast_length / self.config_npw.freq)
-        self.n_lags = int(self.config_npw.historic_lenght / self.config_npw.freq)
-        self.metrics_test = pd.DataFrame(columns=METRICS)
-        self.metrics_train = pd.DataFrame(columns=METRICS)
-        self.folds = list()
-        self.n_fold = 0
-        self.list_keys_fold = list()
-        self.list_test_RMSE = list()
+            self.synthetic_events = self.synthetic_events
+        self.n_forecasts = int(
+            self.FCev_config.forecast_length / self.input_series.freq
+        )
+        self.n_lags = int(self.FCev_config.ts_duration / self.input_series.freq)
+        self.folds = pd.DataFrame(columns=["start_date", "end_date"])
 
-        self.list_test_MAE = list()
-
+    # IT has to be change completly
     def get_synthetic_events(self):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             model = GaussianCopula()
-            model.fit(self.input_events)
+            model.fit(self.events_ts)
             synthetic_events = pd.DataFrame()
             pre_synthetic_events = model.sample(100)
-            for column_name in self.input_events.columns:
-                synthetic_events = pd.concat(
-                    [synthetic_events, pre_synthetic_events.nlargest(1, column_name)]
-                )
-
-        return synthetic_events
-
-    def get_events(self, config_event):
-        if True:  # isinstance(config_event, ConfigEQ):
-            events = prepare_eq(
-                self.df_events,
-                config_event.dist_start,
-                config_event.dist_delta,
-                config_event.mag_start,
-                config_event.mag_delta,
-                config_event.filter,
-                config_event.drop,
-            )
-            return events
-        else:
-            raise TypeError("The configuration file is not valid")
-        return events
 
     def get_folds(self, k=5):
-        if self.config_npw.type == EventFC.NP:
-            self.folds = list()
-            # Own fold method
-            start_folds = int(self.config_npw.training_length / self.config_npw.freq)
-            len_folds = int((len(self.input_df) - start_folds) / k)
-            for index_fold in range(1, k + 1):
-                fold = self.input_df[: start_folds + (index_fold * len_folds)]
-                self.folds.append(fold)
-            # self.folds = model.crossvalidation_split_df(self.input_l_df, self.config_npw.freq, k, fold_pct, fold_overlap_pct)
-            self.n_fold = 0
+        # Own fold method
+
+        self.folds = pd.DataFrame(columns=["start_date", "end_date"])
+        duration_fold = (self.input_series.duration - self.FCev_config.ts_duration) / (
+            k - 1
+        )
+        for index_fold in range(k):
+            end_fold = (
+                self.input_series.start_time()
+                + self.FCev_config.ts_duration
+                + (index_fold * duration_fold)
+            )
+            start_fold = end_fold - self.FCev_config.ts_duration
+            self.folds.loc[index_fold] = [start_fold, end_fold]
 
     def process_fold(self, index_fold):
         if index_fold < len(self.folds):
-            df_train = self.folds[index_fold]
+            train_ts = self.folds[index_fold]
             start_date = df_train.iloc[-self.n_forecasts]["ds"]
             config_fc = ConfigForecast(start_forecast=start_date, offset_event=None)
             df_RMSE, df_MAE = self.add_forecast(config_fc)
@@ -198,7 +158,9 @@ class NPw:
             raise Warning("K Folds finished")
 
     def get_results(self):
-        return pd.concat(self.list_test_RMSE, keys=self.list_keys_fold), pd.concat(self.list_test_MAE, keys=self.list_keys_fold)
+        return pd.concat(self.list_test_RMSE, keys=self.list_keys_fold), pd.concat(
+            self.list_test_MAE, keys=self.list_keys_fold
+        )
 
     def add_forecast(self, config_forecast):
 
@@ -378,7 +340,10 @@ class NPw:
         else:
             multiplicative_trend = "local"
         pi = 0.8  # prediction interval
-        qts = [(1 - pi) / 2, pi + (1 - pi) / 2]  # quantiles based on the prediction interval
+        qts = [
+            (1 - pi) / 2,
+            pi + (1 - pi) / 2,
+        ]  # quantiles based on the prediction interval
         model = NeuralProphet(
             n_forecasts=self.n_forecasts,
             growth=self.config_npw.growth,
@@ -396,7 +361,7 @@ class NPw:
             trend_global_local=multiplicative_trend,
             season_global_local=multivariate_season,
             epochs=self.config_npw.epochs,
-            quantiles = qts,
+            quantiles=qts,
             impute_missing=True,
             impute_rolling=1000,
             impute_linear=1000,
@@ -424,11 +389,11 @@ class NPw:
         list_synthetic_RMSE.append(df_RMSE)
         list_synthetic_MAE.append(df_MAE)
         if self.config_npw.event_type == "Binary":
-            current_events = pd.DataFrame(pd.Series({"EV": 1.0}), columns= ["EV"])
+            current_events = pd.DataFrame(pd.Series({"EV": 1.0}), columns=["EV"])
         elif self.config_npw.event_type == "Non-Binary":
             current_events = self.synthetic_events
         else:
-            current_events = pd.DataFrame() 
+            current_events = pd.DataFrame()
 
         for idx, synthetic_event in current_events.iterrows():
             # dt_events = pd.date_range(start = start_forecast_time, end = start_forecast_time + self.config_npw.forecast_length, periods = 5).values
@@ -476,9 +441,7 @@ class NPw:
         df_results_MAE = pd.concat(list_synthetic_MAE, axis=1, keys=list_keys)
         return df_results_RMSE, df_results_MAE
 
-
-    def one_step_test(self, model, start_forecast_time, df_test ):
-
+    def one_step_test(self, model, start_forecast_time, df_test):
 
         future = model.make_future_dataframe(
             df_test, n_historic_predictions=self.n_forecasts
@@ -486,14 +449,22 @@ class NPw:
         forecast = model.predict(future, decompose=False, raw=True)
 
         forecast = forecast[forecast["ds"] == start_forecast_time]
-        steps_name = ["step"+str(x) for x in range(self.n_forecasts)]
-        forecast_unce = forecast[forecast.columns.difference(steps_name)].drop(["ds", "ID"], axis = 1)
-    
-        forecast_unce.columns = ["step" + str(word) for name in range(self.n_forecasts) for word in (str(name) + "___low", str(name) + "___high")]
-        forecast_unce.columns = forecast_unce.columns.str.split("___", expand=True)
-        forecast_unce = forecast_unce.swaplevel(axis = 1)
+        steps_name = ["step" + str(x) for x in range(self.n_forecasts)]
+        forecast_unce = forecast[forecast.columns.difference(steps_name)].drop(
+            ["ds", "ID"], axis=1
+        )
 
-        forecast_unce = forecast_unce["high"].sub(forecast_unce["low"]).abs().T.mean(axis = 0) 
+        forecast_unce.columns = [
+            "step" + str(word)
+            for name in range(self.n_forecasts)
+            for word in (str(name) + "___low", str(name) + "___high")
+        ]
+        forecast_unce.columns = forecast_unce.columns.str.split("___", expand=True)
+        forecast_unce = forecast_unce.swaplevel(axis=1)
+
+        forecast_unce = (
+            forecast_unce["high"].sub(forecast_unce["low"]).abs().T.mean(axis=0)
+        )
 
         forecast = forecast[steps_name]
         forecast = forecast.reset_index().drop("index", axis=1).T
@@ -503,9 +474,15 @@ class NPw:
         forecast.columns = df_test.columns
         forecast_unce.columns = df_test.columns
         # Too late to find a better solution
-        non_valid_column = [name_valid_column for name_valid_column in df_test if df_test[name_valid_column].isnull().values.all()]
+        non_valid_column = [
+            name_valid_column
+            for name_valid_column in df_test
+            if df_test[name_valid_column].isnull().values.all()
+        ]
         df_test = df_test.dropna(axis=1, how="all")
-        forecast = forecast.drop(non_valid_column, axis = 1)#[list(df_test.columns.values)]
+        forecast = forecast.drop(
+            non_valid_column, axis=1
+        )  # [list(df_test.columns.values)]
         forecast.columns = df_test.columns + "___pred"
         df_test.columns = df_test.columns + "___current"
         # Improve with pd.concat keys

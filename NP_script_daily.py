@@ -1,3 +1,4 @@
+
 from aux_function_SR import read_data, get_eq_filtered, SR_SENSORS
 import pandas as pd
 import numpy as np
@@ -5,8 +6,22 @@ from neuralprophet import NeuralProphet, set_log_level, save, load
 import logging
 import pandas as pd
 from datetime import datetime, timedelta
+import pickle
 from NPw import NPw, ConfigEQ, ConfigNPw, ConfigForecast
+from dataclasses import dataclass, asdict
 from dateutil.relativedelta import *
+from NPw_aux import prepare_ion_data
+import ast
+from pathlib import Path
+import sys
+import logging
+import datetime
+import os.path
+import re
+import subprocess
+import sys
+set_log_level("ERROR")
+logging.disable(logging.CRITICAL)
 
 # click_example.py
 import sys
@@ -14,75 +29,124 @@ import click
 
 # initialize result to 0
 result = 0
-
+from NPw import NPw, ConfigEQ, ConfigNPw, ConfigForecast, METRICS
 
 @click.command()
-@click.option("--epochs", default=0, help="Enter the number of epochs")
+@click.option("--epochs",default = 0,type=int, help="number of epochs")
+@click.option("--datapath", help="Enter datapath")
+@click.option("--historic_lenght", default= 5,help="Enter historic_lenght")
 @click.option(
-    "--day", default=1, help="Enter the first day to forecast from 2017-01-01", type=int
+    "--training_lenght_days", default= 365, help="Enter the training_lenght_days", type=int
 )
-@click.option("--n_iteration", default="0", help="Enter the iteration number")
+@click.option("--num_hidden_layers", default= 16, help="num_hidden_layers")
 @click.option(
-    "--mode",
-    default="daily",
-    type=click.Choice(["daily", "monthly"]),
-    help="Enter the mode",
+    "--seasonal_mode",
+    default = "additive",
+    type=click.Choice(["multiplicative", "additive"]),
+    help="Set seasonla mode seasonality",
 )
-@click.option("--gpu", default=False, type=bool, help="Use GPU?")
-@click.option("--log", default=False, type=bool, help="Show bar progres??")
-@click.option("--qm_len", default=24, type=int, help="Lenght of the question mark len")
-def configure(epochs, day, n_iteration, mode, gpu, log, qm_len):
+@click.option("--d_hidden",default = 16, help="d_hidden")
+@click.option("--daily_seasonality", default = True, type=bool, help="Set daily seasonality")
+@click.option("--yearly_seasonality",default = True,  type=bool, help="Set yearly seasonality")
+@click.option("--seasonal_reg", default = 0, type=float, help="Set regularization coefficient for seasonality")
 
-    set_log_level("ERROR")
+@click.option("--multivariate_season",default = True, type=bool, help="Set Multivariate seasonality")
+@click.option("--multivariate_trend",default = True, type=bool, help="Set Multivariate trend")
+
+@click.option(
+    "--event_mode",
+    default = "multiplicative",
+    type=click.Choice(["multiplicative", "additive"]),
+    help="Set event type",
+)
+@click.option("--trend_regularization",default = True, type=bool, help="Trend regularization")
+
+@click.option("--trend_n_changepoint", default = 10,type=int, help="Number of Changepoit")
+@click.option("--sparce_ar",default = 0, type=float, help="sparce_ar")
+@click.option(
+    "--growth",
+    default = "off",
+    type=click.Choice(["off", "linear"]),
+    help="Set event type",
+)
+
+@click.option("--total_folds",default = 12,type=int, help="number of total folds")
+@click.option("--current_fold",default = 0, help="number of the current fold")
+
+
+def configure(epochs, datapath, historic_lenght, training_lenght_days, num_hidden_layers, d_hidden, daily_seasonality, yearly_seasonality, seasonal_mode, seasonal_reg, multivariate_season, multivariate_trend, event_mode, trend_regularization, trend_n_changepoint, sparce_ar, growth,total_folds, current_fold):
+    freq = timedelta(minutes=30)
+    df_GNSSTEC,df_covariate, df_eq = prepare_ion_data(datapath, "GRK", freq)
+    df_regressor = df_GNSSTEC.reset_index()
+    df_other = df_covariate
+    df_events = df_eq
+
+    forecast_length = timedelta(hours=24)
+    question_mark_length = timedelta(hours=24)
+    # Time to take into account to predict 
+    historic_lenght =  timedelta(days=historic_lenght)
+    training_lenght = timedelta(days=training_lenght_days)
+
     if epochs == 0:
         epochs = None
-    delta = timedelta(minutes=30)
+        
+    config_npw_d = {
+        "forecast_length": forecast_length,
+        "question_mark_length": question_mark_length,
+        "freq": freq,
+        "training_length": training_lenght,
+        "historic_lenght": historic_lenght,
+        "drop_missing": False,
+        "num_hidden_layers": num_hidden_layers,
+        "learning_rate": None,
+        "d_hidden": d_hidden,
+        "yearly_seasonality": yearly_seasonality,
+        "daily_seasonality" : daily_seasonality,
+        "weekly_seasonality" : False,
+        "seasonal_mode": seasonal_mode,
+        "seasonal_reg": seasonal_reg,
+        "multivariate_season": multivariate_season,
+        "multivariate_trend": multivariate_trend,
+        "verbose": False,
+        "epochs": epochs,
+        "use_gpu": False,
+        "event_type": "Non-Binary",
+        "event_mode": event_mode,
+        "normalization": True,
+        "trend_regularization": trend_regularization,
+        "trend_n_changepoint": trend_n_changepoint,
+        "sparce_AR": sparce_ar,
+        "loss_func": "Huber",
+        "growth": growth
+    }
+
+    config_npw = ConfigNPw(**config_npw_d)
+    ConfigEQ_d = {
+        "dist_start": 1000,
+        "dist_delta": 3000,
+        "mag_start": 4.5,
+        "mag_delta": 2,
+        "filter": True,
+        "drop": ["arc_cos", "arc_sin"]
+    }
+    config_events = ConfigEQ(**ConfigEQ_d)
+
+    synthetic_events = pd.read_pickle(datapath + "synthetic.pkl")
+
     # Read SR and EQ data
-    df = read_data("NPdata.mat")
-    arrays = (
-        pd.DataFrame(df["NS_mean"])
-        .applymap(lambda x: np.array(x, dtype=np.float32))
-        .to_numpy()
-    )
-    # Adatpt to NeuralProphet input data
-    NS_mean = np.array(np.stack([np.stack(a[0].squeeze()) for a in arrays]))
-    # Create datetime Array
-    pd.date_range(start="2018-09-09", end="2020-02-02")
-    ds = pd.date_range(start="2016-01-01", end="2021-01-01", freq="30min")
-    # Create the prior dataframe
-    df_regressor = pd.DataFrame(
-        {
-            "ds": ds,
-            "S0": NS_mean[:, 0],
-            "S1": NS_mean[:, 1],
-            "S2": NS_mean[:, 2],
-            "S3": NS_mean[:, 3],
-            "S4": NS_mean[:, 4],
-            "S5": NS_mean[:, 5],
-            "S6": NS_mean[:, 6],
-            "S7": NS_mean[:, 7],
-            "S8": NS_mean[:, 8],
-            "S9": NS_mean[:, 9],
-        }
-    )
-    df_events = df_SR.loc[:, ["mag", "dist", "lat", "arc"]]
-    config_path = "config_001.json"
-    (config_npw, config_events) = NPw.load_config(config_path)
-
-    hours_offsets = [0]
-    event_offsets = [None, -timedelta(hours=12)]
-
-    start_day = datetime.fromisoformat("2017-01-01T10:00:00")
-    NPw_o = NPw(config_npw, df_regressor, config_events, df_events)
-    start_date = start_day + int(day) * relativedelta(days=+1)
-    for index_day in range(int(n_iteration) + 1):
-        current_day = start_date + index_day * relativedelta(days=+1)
-        print(str(current_day))
-        test_metrics = NPw_o.predict_with_offset_hours(
-            current_day, hours_offsets, event_offsets
-        )
-        NPw_o.save_df(current_day.strftime("%m_%d_%Y_%H_%M_%S"))
-
+    NPw_o = NPw(config_npw, df_regressor,df_other, config_events, df_events, synthetic_events)
+    NPw_o.get_folds(k = total_folds)
+    df_forecast, df_uncer = NPw_o.process_fold(1)
+    from NPw import METRICS
+    cov_result = NPw_o.get_metrics_from_fc(df_forecast["BASE"], METRICS.CoV)
+    print(str(cov_result) + '\n')
+    sys.exit(0)
 
 if __name__ == "__main__":
     configure()
+
+# Useful function to print errors.
+def target_runner_error(msg):
+    now = datetime.datetime.now()
+    print(str(now) + " error: " + msg)
+    sys.exit(1)
