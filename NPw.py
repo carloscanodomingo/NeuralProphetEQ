@@ -194,7 +194,7 @@ class NPw:
         if self.config_npw.type == EventFC.NP:
             self.folds = list()
             # Own fold method
-            start_folds = int(self.config_npw.training_length / self.config_npw.freq)
+            start_folds = int(len(self.input_df) // 2)
             len_folds = int((len(self.input_df) - start_folds) / k)
             for index_fold in range(1, k + 1):
                 fold = self.input_df[: start_folds + (index_fold * len_folds)]

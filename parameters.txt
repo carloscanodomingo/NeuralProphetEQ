@@ -26,18 +26,19 @@
 ##    condition is satisfied, FALSE otherwise.
 
 # 1:                     2:                                 3:      4:                             5:
-historic_lengh          "--historic_lengh="                 i      (1, 30) 
+historic_lenght          "--historic_lenght="                 i      (1, 30) 
 training_lenght_days    "--training_lenght_days="           i      (30, 730) 
-num_hidden_layers       "--num_hidden_layers="              i      (8, 128) 
+num_hidden_layers       "--num_hidden_layers="              i      (1, 10) 
+n_hidden                "--n_hidden="                       i      (4, 64) 
+
 seasonal_mode           "--seasonal_mode="                  c      ("multiplicative", "additive")  | daily_seasonality == 1 || yearly_seasonality == 1
 yearly_seasonality      "--yearly_seasonality="             i      (0,1)
 daily_seasonality       "--daily_seasonality="              i      (0,1)
-seasonal_reg            "--seasonal_reg="                   r      (0,1) CHEEECK
+seasonal_reg            "--seasonal_reg="                   r      (0,1)                          | daily_seasonality == 1 || yearly_seasonality == 1
 multivariate_season     "--multivariate_season="            i      (0,1)
 multivariate_trend      "--multivariate_trend="             i      (0,1)
 event_mode              "--event_mode="                     c      ("multiplicative", "additive") 
-trend_regularization    "--multivariate_trend="             i      (0,1)
+trend_regularization    "--trend_regularization="             i      (0,1)
 trend_n_changepoint     "--trend_n_changepoint="            i       (1,100)
-trend_regularization    "--multivariate_trend="             i      (0,1)
 sparce_ar               "--sparce_ar="                      r      (0,100)
 growth                  "--growth="                         c      ("off", "linear") 

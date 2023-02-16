@@ -1,8 +1,24 @@
+#!/usr/bin/env python
 
-from aux_function_SR import read_data, get_eq_filtered, SR_SENSORS
+###############################################################################
+# This script is the command that is executed every run.
+# Check the examples in examples/
+#
+# This script is run in the execution directory (execDir, --exec-dir).
+#
+# PARAMETERS:
+# argv[1] is the candidate configuration number
+# argv[2] is the instance ID
+# argv[3] is the seed
+# argv[4] is the instance name
+# The rest (argv[5:]) are parameters to the run
+#
+# RETURN VALUE:
+# This script should print one numerical value: the cost that must be minimized.
+# Exit with 0 if no error, with 1 in case of error
+###############################################################################
 import pandas as pd
-import numpy as np
-from neuralprophet import NeuralProphet, set_log_level, save, load
+from neuralprophet import  set_log_level
 import logging
 import pandas as pd
 from datetime import datetime, timedelta
@@ -16,10 +32,12 @@ from pathlib import Path
 import sys
 import logging
 import datetime
+import os
 import os.path
 import re
 import subprocess
 import sys
+import contextlib
 set_log_level("ERROR")
 logging.disable(logging.CRITICAL)
 
@@ -31,9 +49,12 @@ import click
 result = 0
 from NPw import NPw, ConfigEQ, ConfigNPw, ConfigForecast, METRICS
 
-@click.command()
+@click.command(context_settings=dict(
+    ignore_unknown_options=True,
+allow_extra_args=True
+))
 @click.option("--epochs",default = 0,type=int, help="number of epochs")
-@click.option("--datapath", help="Enter datapath")
+# @click.option("--datapath", help="Enter datapath")
 @click.option("--historic_lenght", default= 5,help="Enter historic_lenght")
 @click.option(
     "--training_lenght_days", default= 365, help="Enter the training_lenght_days", type=int
@@ -74,7 +95,9 @@ from NPw import NPw, ConfigEQ, ConfigNPw, ConfigForecast, METRICS
 @click.option("--current_fold",default = 0, help="number of the current fold")
 
 
-def configure(epochs, datapath, historic_lenght, training_lenght_days, num_hidden_layers, d_hidden, daily_seasonality, yearly_seasonality, seasonal_mode, seasonal_reg, multivariate_season, multivariate_trend, event_mode, trend_regularization, trend_n_changepoint, sparce_ar, growth,total_folds, current_fold):
+def configure(epochs,  historic_lenght, training_lenght_days, num_hidden_layers, d_hidden, daily_seasonality, yearly_seasonality, seasonal_mode, seasonal_reg, multivariate_season, multivariate_trend, event_mode, trend_regularization, trend_n_changepoint, sparce_ar, growth,total_folds, current_fold):
+
+    datapath = os.environ.get("DATA_PATH")
     freq = timedelta(minutes=30)
     df_GNSSTEC,df_covariate, df_eq = prepare_ion_data(datapath, "GRK", freq)
     df_regressor = df_GNSSTEC.reset_index()
@@ -134,11 +157,16 @@ def configure(epochs, datapath, historic_lenght, training_lenght_days, num_hidde
     synthetic_events = pd.read_pickle(datapath + "synthetic.pkl")
 
     # Read SR and EQ data
+    sys.stdout = open(os.devnull, "w")
+    sys.stderr = open(os.devnull, "w")
+    print("This won't be printed.")
     NPw_o = NPw(config_npw, df_regressor,df_other, config_events, df_events, synthetic_events)
     NPw_o.get_folds(k = total_folds)
     df_forecast, df_uncer = NPw_o.process_fold(1)
     from NPw import METRICS
     cov_result = NPw_o.get_metrics_from_fc(df_forecast["BASE"], METRICS.CoV)
+    sys.stdout = sys.__stdout__
+    sys.stderr = sys.__stderr__
     print(str(cov_result) + '\n')
     sys.exit(0)
 
