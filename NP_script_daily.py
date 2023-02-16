@@ -53,6 +53,8 @@ from NPw import NPw, ConfigEQ, ConfigNPw, ConfigForecast, METRICS
     ignore_unknown_options=True,
 allow_extra_args=True
 ))
+
+@click.option("--verbose",default = 0,type=int, help="verbose")
 @click.option("--epochs",default = 0,type=int, help="number of epochs")
 # @click.option("--datapath", help="Enter datapath")
 @click.option("--historic_lenght", default= 5,help="Enter historic_lenght")
@@ -95,7 +97,7 @@ allow_extra_args=True
 @click.option("--current_fold",default = 0, help="number of the current fold")
 
 
-def configure(epochs,  historic_lenght, training_lenght_days, num_hidden_layers, d_hidden, daily_seasonality, yearly_seasonality, seasonal_mode, seasonal_reg, multivariate_season, multivariate_trend, event_mode, trend_regularization, trend_n_changepoint, sparce_ar, growth,total_folds, current_fold):
+def configure(epochs, verbose, historic_lenght, training_lenght_days, num_hidden_layers, d_hidden, daily_seasonality, yearly_seasonality, seasonal_mode, seasonal_reg, multivariate_season, multivariate_trend, event_mode, trend_regularization, trend_n_changepoint, sparce_ar, growth,total_folds, current_fold):
 
     datapath = os.environ.get("DATA_PATH")
     freq = timedelta(minutes=30)
@@ -157,8 +159,9 @@ def configure(epochs,  historic_lenght, training_lenght_days, num_hidden_layers,
     synthetic_events = pd.read_pickle(datapath + "synthetic.pkl")
 
     # Read SR and EQ data
-    sys.stdout = open(os.devnull, "w")
-    sys.stderr = open(os.devnull, "w")
+    if verbose == 0:    
+        sys.stdout = open(os.devnull, "w")
+        sys.stderr = open(os.devnull, "w")
     print("This won't be printed.")
     NPw_o = NPw(config_npw, df_regressor,df_other, config_events, df_events, synthetic_events)
     NPw_o.get_folds(k = total_folds)
