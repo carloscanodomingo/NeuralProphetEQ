@@ -1,9 +1,7 @@
-import pandas as pd
 from neuralprophet import NeuralProphet, forecaster, load
+import pandas as pd
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
-
-from sdv.tabular.copulas import NonParametricError
 from aux_function_SR import get_eq_filtered, SR_SENSORS
 from NPw_aux import drop_scale, prepare_eq
 import numpy as np
@@ -11,8 +9,8 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, confusion_m
 from unique_names_generator import get_random_name
 from unique_names_generator.data import ADJECTIVES, NAMES, ANIMALS, COLORS
 from dateutil.relativedelta import *
-import dateutil.parser
 import os
+import dateutil.parser
 from pathlib import Path
 from enum import Enum
 from typing_extensions import Literal
@@ -23,21 +21,11 @@ from IPython.core.display import HTML
 import json
 
 from sdv.tabular import GaussianCopula
-
-
-class EventFC(Enum):
-    NP = 0
+from darts import TimeSeries
 
 
 @dataclass
-class ConfigNPw:
-    type = EventFC.NP
-    forecast_length: pd.Timedelta
-    question_mark_length: pd.Timedelta
-    freq: pd.Timedelta
-    training_length: pd.Timedelta
-    learning_rate: float
-    historic_lenght: pd.Timedelta
+class NeuralProphet_config:
     d_hidden: int
     num_hidden_layers: int
     yearly_seasonality: bool
@@ -49,12 +37,10 @@ class ConfigNPw:
     multivariate_trend: bool
     verbose: bool
     epochs: int
-    use_gpu: bool
     drop_missing: bool
     impute_missing = True
     impute_linear = 48
     impute_rolling = 48
-    event_type: Literal["None", "Binary", "Non-Binary"]
     normalization: bool
     event_mode: Literal["additive", "multiplicative"]
     growth: Literal["off", "Lineal"]
@@ -63,45 +49,70 @@ class ConfigNPw:
     sparce_AR: float
     loss_func: Literal["Huber", "MSE", "MAE", "L1-Loss", "kl_div"]
 
+
+class FCeV_type(Enum):
+    NeuralProphet = 0
+    Darts_TCN = 10
+    Darts_TFT = 11
+
+
+class FCeV_models(Enum):
+    NeuralProphet = 0
+    Darts = 1
+
+
+def get_FCeV_model(fcev_type):
+    print(fcev_type)
+    if fcev_type is FCeV_type.NeuralProphet:
+        print("NEURAL")
+        return FCeV_models.NeuralProphet
+    if fcev_type.value == FCeV_type.Darts_TCN.value:
+        print("ENTER HERE")
+        return FCeV_models.Darts
+    else:
+        print("Other things")
+
+
+@dataclass
+class FCeVConfig:
+    """
+
+    Attributes:
+        forecast_length:
+        question_mark_length:
+    """
+
+    freq: pd.Timedelta
+    type: FCeV_type
+    forecast_length: pd.Timedelta
+    question_mark_length: pd.Timedelta
+    end_date_train: datetime
+    end_date_val: datetime
+    learning_rate: float
+    ts_duration: pd.Timedelta
+    use_gpu: bool
+    event_type: Literal["None", "Binary", "Non-Binary"]
+
     def __post_init__(self):
         self.forecast_length = pd.Timedelta(self.forecast_length)
-        self.historic_lenght = pd.Timedelta(self.historic_lenght)
-        self.freq = pd.Timedelta(self.freq)
         self.question_mark_length = pd.Timedelta(self.question_mark_length)
-        self.training_length = pd.Timedelta(self.training_length)
-
-
-class METRICS(Enum):
-    CoV = (0,)
-    mape = (1,)
-    marre = (2,)
-
-
-@dataclass
-class ConfigEQ:
-    dist_start: int
-    dist_delta: int
-    mag_start: float
-    mag_delta: float
-    filter: bool
-    drop: list
-
-
-@dataclass
-class ConfigForecast:
-    start_forecast: datetime
-    offset_event: timedelta
 
 
 # Convert from wide format to long format df
-def multivariate_df(df, df_covariate):
-    var_names = df.columns[1:]
+def multivariate_df(df):
+    """Function to convert columns of a DF to a single column with with ID column
+
+    Args:
+        df (): Input dataframe has to have one column named DS
+
+    Returns:
+        Return de dataframe with ID equal to each column
+
+    """
+    var_names = list(df)[1:]
     mv_df = pd.DataFrame()
-    df_current = df.copy()
     for col in var_names:
-        aux = df_current[["ds", col]].copy(
-            deep=True
-        )  # select column associated with region
+        aux = df[["ds", col]].copy(deep=True)  # select column associated with region
         aux = aux.iloc[:, :].copy(
             deep=True
         )  # selects data up to 26301 row (2004 to 2007 time stamps)
@@ -109,150 +120,102 @@ def multivariate_df(df, df_covariate):
             columns={col: "y"}
         )  # rename column of data to 'y' which is compatible with Neural Prophet
         aux["ID"] = col
-        aux = aux.set_index("ds")
-        aux = aux.join(df_covariate)
         mv_df = pd.concat((mv_df, aux))
-    return mv_df.reset_index()
+    return mv_df
 
 
-class NPw:
+# Funtion to convert from dataframe to Dart Timeseries
+def df_to_ts(df):
+    if df.empty:
+        return None
+    else:
+        return TimeSeries.from_dataframe(df)
+
+
+class FCeV:
     def __init__(
         self,
-        config_npw,
-        df,
-        df_covariate,
-        config_events,
+        FCev_config,
+        df_input,
+        df_past_covariates,
+        df_future_covariates,
         df_events,
         synthetic_events=pd.DataFrame(),
     ):
-        self.NPw_columns = [
-            "start_forecast",
-            "n_samples",
-            "offset_model",
-            "RMSE",
-            "MSE",
-            "MAE",
-            "actual_event",
-            "expected_event",
-        ]
-        self.config_npw = config_npw
-        self.df_events = df_events
-        # Convert from wide format to long format
-        self.input_df = df
-        self.name = get_random_name(
-            separator="_", combo=[COLORS, ANIMALS], style="lowercase"
-        )
-        self.df_covariate = df_covariate
-        self.input_l_df = multivariate_df(self.input_df, self.df_covariate)
-        self.config_events = config_events
-        self.input_events, self.transform, self.input_events_filtered = self.get_events(
-            self.config_events
-        )
-        if synthetic_events.empty:
-            self.synthetic_events = self.get_synthetic_events()
+        if FCev_config is FCeVConfig:
+            self.FCev_config = FCev_config
         else:
-            self.synthetic_events = drop_scale(
-                synthetic_events, self.transform, self.config_events.drop
-            )
-        self.npw_df = pd.DataFrame(columns=self.NPw_columns)
-        self.n_forecasts = int(self.config_npw.forecast_length / self.config_npw.freq)
-        self.n_lags = int(self.config_npw.historic_lenght / self.config_npw.freq)
-        self.metrics_test = pd.DataFrame(columns=METRICS)
-        self.metrics_train = pd.DataFrame(columns=METRICS)
-        self.folds = list()
-        self.n_fold = 0
-        self.list_keys_fold = list()
-        self.list_test_RMSE = list()
+            raise ValueError("Not valid FCev config file")
+        self.FCeV_model = get_FCeV_model(self.FCev_config.type)
+        if self.FCeV_model == FCeV_models.Darts:
+            self.input_series = df_to_ts(df_input)
+            if self.input_series == None:
+                raise KeyError("A non empty dataframe has to be pass for df_input")
+            self.past_covariates = df_to_ts(df_past_covariates)
+            self.future_covariates = df_to_ts(df_future_covariates)
+            self.events_ts = df_to_ts(df_events)
+            self.synthetic_events = synthetic_events
+            self.duration = pd.Timedelta(self.input_series.duration)
+            self.start_date = pd.Timestamp(self.input_series.start_time())
+        else:
+            raise KeyError("Model not implemented")
+        # Convert from wide format to long format
+        if synthetic_events.empty:
+            self.synthetic_events = None  # self.get_synthetic_events()
+        else:
+            self.synthetic_events = self.synthetic_events
+        self.n_forecasts = int(self.FCev_config.forecast_length / self.FCev_config.freq)
+        self.n_lags = int(self.FCev_config.ts_duration / self.FCev_config.freq)
 
-        self.list_test_MAE = list()
+        self.folds = pd.DataFrame(columns=["start_date", "end_date"])
 
+    # IT has to be change completly
     def get_synthetic_events(self):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             model = GaussianCopula()
-            model.fit(self.input_events)
+            model.fit(self.events_ts)
             synthetic_events = pd.DataFrame()
             pre_synthetic_events = model.sample(100)
-            for column_name in self.input_events.columns:
-                synthetic_events = pd.concat(
-                    [synthetic_events, pre_synthetic_events.nlargest(1, column_name)]
-                )
-
-        return synthetic_events
-
-    def get_events(self, config_event):
-        if True:  # isinstance(config_event, ConfigEQ):
-            events = prepare_eq(
-                self.df_events,
-                config_event.dist_start,
-                config_event.dist_delta,
-                config_event.mag_start,
-                config_event.mag_delta,
-                config_event.filter,
-                config_event.drop,
-            )
-            return events
-        else:
-            raise TypeError("The configuration file is not valid")
-        return events
 
     def get_folds(self, k=5):
-        if self.config_npw.type == EventFC.NP:
-            self.folds = list()
-            # Own fold method
-            start_folds = int(len(self.input_df) // 2)
-            len_folds = int((len(self.input_df) - start_folds) / k)
-            for index_fold in range(1, k + 1):
-                fold = self.input_df[: start_folds + (index_fold * len_folds)]
-                self.folds.append(fold)
-            # self.folds = model.crossvalidation_split_df(self.input_l_df, self.config_npw.freq, k, fold_pct, fold_overlap_pct)
-            self.n_fold = 0
+        """Function to split all data into folds
+
+        Args:
+            k ():  number of folds
+        """
+        # Own fold method
+        self.folds = pd.DataFrame(columns=["start_date", "end_date"])
+        start_folds = self.start_date + (self.duration // 2)
+        len_folds = self.duration / (2 * (k + 1))
+        for index_fold in range(k + 1):
+            end_fold = start_folds + (index_fold * len_folds)
+            start_fold = end_fold - self.FCev_config.ts_duration
+            self.folds.loc[index_fold] = [start_fold, end_fold]
 
     def process_fold(self, index_fold):
+        """Function to prodcess each fold
+
+        Args:
+            index_fold (): index of the folds, has to be lower than the number of folds in get folds
+
+        Returns:
+            df_forecast (): Dataframe with the forecast
+            df_uncertainty (): Dataframe with the values of uncertainty of that forecast
+
+        """
         if index_fold < len(self.folds):
-            df_train = self.folds[index_fold]
-            start_date = df_train.iloc[-self.n_forecasts - 1]["ds"]
-            config_fc = ConfigForecast(start_forecast=start_date, offset_event=None)
-            print(start_date)
-            df_forecast, df_uncertainty = self.get_forecast(config_fc)
+            start_fold, end_fold = self.folds.iloc[index_fold]
+            df_forecast, df_uncertainty = self.process_forecast(start_fold, end_fold)
             return df_forecast, df_uncertainty
-            # self.list_keys_fold.append(start_date)
-            # self.list_test_RMSE.append(df_RMSE)
-            # self.list_test_MAE.append(df_MAE)
         else:
-            raise Warning("K Folds finished")
+            raise ValueError("K Folds finished")
 
-    def get_results(self):
-        return pd.concat(self.list_test_RMSE, keys=self.list_keys_fold), pd.concat(
-            self.list_test_MAE, keys=self.list_keys_fold
-        )
+    def get_ts(self, ts, start_datetime, end_datetime):
+        if self.FCeV_model == FCeV_models.Darts:
+            return ts.slice(start_datetime, end_datetime)
 
-    def get_forecast(self, config_forecast):
-        model_name = get_random_name(
-            separator="-", combo=[ADJECTIVES, NAMES], style="lowercase"
-        )
-
-        # Insert EQ cases
-        min_idx = np.argmin(
-            np.abs(self.input_df["ds"] - config_forecast.start_forecast)
-        )
-        start_forecast_time = self.input_df["ds"].iloc[min_idx]
-        question_mark_start = start_forecast_time - self.config_npw.question_mark_length
-        # Takes events up to that point
-
-        base_df = self.input_l_df[
-            (
-                self.input_l_df["ds"]
-                < start_forecast_time + self.config_npw.forecast_length
-            )
-            & (
-                self.input_l_df["ds"]
-                > start_forecast_time - self.config_npw.training_length
-            )
-        ]
-
-        model = self.create_NP_model()
-        # Remove all EQ after question_mark_start
+    def add_events_to_model(self):
         dates_events = self.input_events.index
         # Push event fordware forecast time
         current_events_dates = dates_events + (self.config_npw.forecast_length / 2)
@@ -292,7 +255,28 @@ class NPw:
             df_with_events = base_df
         else:
             raise KeyError("EVENT TYPE NOT VALID")
-        self.base_df = base_df
+
+    def process_forecast(self, start_datetime, end_datetime):
+        """Train the model and process a forecast
+
+        Args:
+            start_datetime (): start time for the trining data set
+            end_datetime ():
+
+        Returns:
+
+        """
+        start_forecast_time = start_datetime - self.FCev_config.forecast_length
+        question_mark_start = (
+            start_forecast_time - self.FCev_config.question_mark_length
+        )
+        # Takes events up to that point
+        start_base = end_datetime
+        end_base = start_forecast_time - self.FCev_config.forecast_length
+        base_ts = self.get_ts(self.input_series, start_base, end_base)
+
+        model = self.create_FCeV_model()
+        # Remove all EQ after question_mark_start
         df_train, df_test = model.split_df(df_with_events, valid_p=1, local_split=True)
         start_fc = config_forecast.start_forecast
         self.df_test = df_test
@@ -313,9 +297,9 @@ class NPw:
             expected_event = None
         # Fit the model with df train
 
-        self.model, train_metrics = self.fit(model, df_train)
+        self.model, train_metrics = self.fit(model, base_ts)
         # Compute just one long forecast
-        df_forecast, df_uncertainty = self.test(model, start_forecast_time, df_test)
+        df_RMSE, df_MAE = self.test(model, start_forecast_time, df_test)
         # self.npw_df.loc[model_name] = [
         #     config_forecast.start_forecast,
         #     n_samples,
@@ -323,7 +307,7 @@ class NPw:
         #     actual_event,
         #     expected_event,
         # ]
-        return df_forecast, df_uncertainty
+        return df_RMSE, df_MAE
 
     def plot(self, model, df):
         future = model.make_future_dataframe(
@@ -382,7 +366,7 @@ class NPw:
                 self.npw_df.at[index, "is_fit"] = True
                 self.npw_df.at[index, "model"] = model
 
-    def create_NP_model(self):
+    def create_FCeV_model(self):
         # trainer_config = {"accelerator":"gpu"}
         if self.config_npw.use_gpu:
             print("Using GPU")
@@ -430,40 +414,22 @@ class NPw:
             ar_reg=self.config_npw.sparce_AR,
             loss_func=self.config_npw.loss_func,
         )
-        for covariate_name in self.df_covariate.columns:
-            model.add_future_regressor(name=covariate_name)
         model.set_plotting_backend("plotly")
         return model
-
-    def get_metrics_from_fc(self, df_forecast, metrics):
-        if metrics == METRICS.CoV:
-            mean_pred_values = df_forecast["current"].mean().mean()
-            return (
-                df_forecast["current"]
-                .sub(df_forecast["pred"])
-                .pow(2)
-                .mean(axis=0)
-                .pow(1 / 2)
-                .mean()
-                / mean_pred_values
-            ) * 100
-        else:
-            raise NonParametricError("Not Implemented Yet")
 
     def test(self, model, start_forecast_time, df_test):
         # Without events:
         periods = 5
-        # df_results_RMSE = pd.DataFrame()
-        # df_results_MAE = pd.DataFrame()
-        forecast_result = {}
-        forecast_uncer = {}
-        df_forecast, df_uncer = self.one_step_test(model, start_forecast_time, df_test)
-        # df_RMSE.columns = "0"
-        forecast_result["BASE"] = df_forecast
-        forecast_uncer["BASE"] = df_uncer
-        # list_keys.append("BASE")
-        # list_synthetic_RMSE.append(df_forecast)
-        # list_synthetic_MAE.append(df_MAE)
+        df_results_RMSE = pd.DataFrame()
+        df_results_MAE = pd.DataFrame()
+        list_synthetic_RMSE = list()
+        list_synthetic_MAE = list()
+        list_keys = list()
+        df_RMSE, df_MAE = self.one_step_test(model, start_forecast_time, df_test)
+        df_RMSE.columns = "0"
+        list_keys.append("BASE")
+        list_synthetic_RMSE.append(df_RMSE)
+        list_synthetic_MAE.append(df_MAE)
         if self.config_npw.event_type == "Binary":
             current_events = pd.DataFrame(pd.Series({"EV": 1.0}), columns=["EV"])
         elif self.config_npw.event_type == "Non-Binary":
@@ -472,9 +438,6 @@ class NPw:
             current_events = pd.DataFrame()
 
         for idx, synthetic_event in current_events.iterrows():
-            # Create two dict to gather info
-            forecast_result_synt = {}
-            forecast_uncer_synt = {}
             # dt_events = pd.date_range(start = start_forecast_time, end = start_forecast_time + self.config_npw.forecast_length, periods = 5).values
             # To homogenize the dates in the CSV
             # dt_events = pd.date_range(start = 0, end = self.config_npw.forecast_length, periods = periods).values
@@ -482,6 +445,8 @@ class NPw:
                 self.config_npw.forecast_length / (periods + 1) * x
                 for x in range(1, periods + 1)
             ]
+            df_dt_MAE = pd.DataFrame()
+            df_dt_RMSE = pd.DataFrame()
             for dt in event_offset:
                 current_df_test = df_test.copy()
                 unique_dates = current_df_test["ds"].unique()
@@ -500,30 +465,28 @@ class NPw:
                 events_df = pd.DataFrame(synthetic_event).copy()
                 events_df["ds"] = closest_date
 
-                df_forecast, df_uncer = self.one_step_test(
+                df_RMSE, df_MAE, uncer = self.one_step_test(
                     model, start_forecast_time, current_df_test
                 )
-                forecast_result_synt[str(dt.total_seconds())] = df_forecast
-                forecast_uncer_synt[str(dt.total_seconds())] = df_uncer
-                # df_dt_RMSE = pd.concat([df_dt_RMSE, df_RMSE], axis=1)
-                # df_dt_MAE = pd.concat([df_dt_MAE, df_MAE], axis=1)
-            forecast_result["SYNT_" + str(idx)] = forecast_result_synt
-            forecast_uncer["SYNT_" + str(idx)] = forecast_uncer_synt
-            # list_synthetic_RMSE.append(df_dt_RMSE)
-            # list_synthetic_MAE.append(df_dt_MAE)
-            # list_keys.append("SYNT_" + str(idx))
-        # df_results_RMSE = pd.concat(list_synthetic_RMSE, axis=1, keys=list_keys)
-        # df_results_MAE = pd.concat(list_synthetic_MAE, axis=1, keys=list_keys)
-        return forecast_result, forecast_uncer  ###f_results_RMSE, df_results_MAE
+                df_RMSE = df_RMSE.rename(
+                    str(dt.total_seconds())
+                )  # pd.to_datetime(str()).strftime("%m/%d/%Y, %H:%M:%S"))
+                df_MAE = df_MAE.rename(
+                    str(dt.total_seconds())
+                )  # pd.to_datetime(str()).strftime("%m/%d/%Y, %H:%M:%S"))
+                df_dt_RMSE = pd.concat([df_dt_RMSE, df_RMSE], axis=1)
+                df_dt_MAE = pd.concat([df_dt_MAE, df_MAE], axis=1)
+            list_synthetic_RMSE.append(df_dt_RMSE)
+            list_synthetic_MAE.append(df_dt_MAE)
+            list_keys.append("SYNT_" + str(idx))
+        df_results_RMSE = pd.concat(list_synthetic_RMSE, axis=1, keys=list_keys)
+        df_results_MAE = pd.concat(list_synthetic_MAE, axis=1, keys=list_keys)
+        return df_results_RMSE, df_results_MAE
 
     def one_step_test(self, model, start_forecast_time, df_test):
-        # future = model.make_future_dataframe(
-        #     df_test, n_historic_predictions=self.n_forecasts
-        # )
-
-        df_current = df_test.copy()[["ds", "ID", "y"]]
-        future = df_test.copy()
-        future.loc[future["ds"] > start_forecast_time, "y"] = np.nan
+        future = model.make_future_dataframe(
+            df_test, n_historic_predictions=self.n_forecasts
+        )
         forecast = model.predict(future, decompose=False, raw=True)
 
         forecast = forecast[forecast["ds"] == start_forecast_time]
@@ -540,33 +503,37 @@ class NPw:
         forecast_unce.columns = forecast_unce.columns.str.split("___", expand=True)
         forecast_unce = forecast_unce.swaplevel(axis=1)
 
-        df_uncer = forecast_unce["high"].sub(forecast_unce["low"]).abs().T.mean(axis=0)
+        forecast_unce = (
+            forecast_unce["high"].sub(forecast_unce["low"]).abs().T.mean(axis=0)
+        )
 
         forecast = forecast[steps_name]
         forecast = forecast.reset_index().drop("index", axis=1).T
-        df_current = pd.pivot(df_current, index="ds", columns="ID", values="y")[
+        df_test = pd.pivot(df_test, index="ds", columns="ID", values="y")[
             -(self.n_forecasts) :
         ]
-        forecast.columns = df_current.columns
-        df_uncer.columns = df_current.columns
+        forecast.columns = df_test.columns
+        forecast_unce.columns = df_test.columns
         # Too late to find a better solution
         non_valid_column = [
             name_valid_column
-            for name_valid_column in df_current
-            if df_current[name_valid_column].isnull().values.all()
+            for name_valid_column in df_test
+            if df_test[name_valid_column].isnull().values.all()
         ]
-        df_current = df_current.dropna(axis=1, how="all")
+        df_test = df_test.dropna(axis=1, how="all")
         forecast = forecast.drop(
             non_valid_column, axis=1
         )  # [list(df_test.columns.values)]
-        forecast.columns = df_current.columns + "___pred"
-        df_current.columns = df_current.columns + "___current"
+        forecast.columns = df_test.columns + "___pred"
+        df_test.columns = df_test.columns + "___current"
         # Improve with pd.concat keys
-        forecast.index = df_current.index
-        df_all = pd.concat([df_current, forecast], axis=1)  # .drop("ds", axis=1)
+        df_all = pd.concat([df_test.reset_index(), forecast], axis=1).drop("ds", axis=1)
         df_all.columns = df_all.columns.str.split("___", expand=True)
         df_all = df_all.swaplevel(axis=1)
-        return df_all, df_uncer  # pd.Series(RMSE.squeeze()), MAE, forecast_unce
+        RMSE = df_all["current"].sub(df_all["pred"]).pow(2).mean(axis=0).pow(1 / 2)
+        MAE = df_all["current"].sub(df_all["pred"]).abs().mean(axis=0)
+        print(forecast_unce)
+        return pd.Series(RMSE.squeeze()), MAE, forecast_unce
 
     # Predict for differents hours offset and differents event offset
     def predict_with_offset_hours(self, start_day, hours_offsets, event_offsets):
@@ -579,7 +546,7 @@ class NPw:
             config_fc = ConfigForecast(
                 start_forecast=start_forecast, offset_event=event_offset
             )
-            test_metrics = self.add_forecast(config_fc)
+            test_metrics = self.process_forecast(config_fc)
             print(
                 str(start_forecast) + " " + str(event_offset) + " " + str(test_metrics)
             )

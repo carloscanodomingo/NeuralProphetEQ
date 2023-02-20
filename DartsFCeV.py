@@ -14,165 +14,209 @@ import dateutil.parser
 from pathlib import Path
 from enum import Enum
 from typing_extensions import Literal
-
+from pytorch_lightning.callbacks import EarlyStopping
 import warnings
 from IPython.display import display
 from IPython.core.display import HTML
 import json
+import torch
+import darts
+from darts.dataprocessing import transformers
 
-from sdv.tabular import GaussianCopula
+from darts.models import TCNModel
 
-from DartsFCeV import DartsFCeV, DartsFCeVConfig
-
-
-
-class METRICS(Enum):
-    CoV = (0,)
-    mape = (1,)
-    marre = (2,)
-
+# from FCeV import FCeVConfig
 
 
 @dataclass
-class FCeVConfig:
-    freq: pd.Timedelta
-    forecast_length: pd.Timedelta
-    question_mark_length: pd.Timedelta
-    training_length: pd.Timedelta
-    input_length: pd.Timedelta
-    verbose: bool
+class DartsFCeVConfig:
+    """
 
-    def __post_init__(self):
-        self.forecast_length = pd.Timedelta(self.forecast_length)
-        self.question_mark_length = pd.Timedelta(self.question_mark_length)
+    Attributes:
+        forecast_length:
+        question_mark_length:
+    """
 
-
-class FCeV_type(Enum):
-    NeuralProphet = 0
-    Darts_TCN = 10
-    Darts_TFT = 11
+    DartsModelConfig: None
+    learning_rate: float
+    use_gpu: bool
+    event_type: Literal["None", "Binary", "Non-Binary"]
+    dropout: float
+    batch_size: int
+    n_epochs: int
 
 
-class FCeV_models(Enum):
-    NeuralProphet = 0
-    Darts = 1
+@dataclass
+class TCNDartsFCeVConfig:
+    dilation_base: float
+    weight_norm: bool
+    kernel_size: int
+    num_filter: int
 
 
-def get_FCeV_model(fcev_type):
-    print(fcev_type)
-    if fcev_type is FCeV_type.NeuralProphet:
-        print("NEURAL")
-        return FCeV_models.NeuralProphet
-    if fcev_type.value == FCeV_type.Darts_TCN.value:
-        print("ENTER HERE")
-        return FCeV_models.Darts
-    else:
-        print("Other things")
+@dataclass
+class TFTDartsFCeVConfig:
+    lstm_layers: int
+    hidden_size: int
+    num_attention_heads: int
+    add_relative_index: bool
+    add_encoders: int
+    likelihood: Literal["QuantileRegression"]
 
 
-class FCeV:
+# Funtion to convert from dataframe to Dart Timeseries
+
+
+
+class DartsFCeV:
     def __init__(
         self,
         FCeV_config,
-        model_FCeV_config,
+        Darts_FCeV_config,
         df_input,
         df_past_covariates,
         df_future_covariates,
         df_events,
         synthetic_events=pd.DataFrame(),
     ):
-        if not isinstance(FCeV_config, FCeVConfig):
-            raise ValueError("FCeV_config has to be a FCeVConfig instance")
-
-        # Move this check to th outside class
-        if df_input.empty:
-            raise KeyError("A non empty dataframe has to be pass for df_input")
-        if isinstance(model_FCeV_config, DartsFCeVConfig):
-            self.FCeV_model = DartsFCeV(
-                FCeV_config,
-                model_FCeV_config,
-                df_input,
-                df_past_covariates,
-                df_future_covariates,
-                df_events,
-                synthetic_events,
-            )
-        else:
-            raise KeyError("Model not implemented")
-        self.start_date = self.FCeV_model.start_date()
-        self.duration = self.FCeV_model.duration()
-        self.FCeV_config = FCeV_config
-        self.folds = None
-        self.index_dates = df_input.reset_index()["ds"]
-
-
-    def create_folds(self, k=5, offset_lenght=None):
-        """Function to split all data into folds
-
-        Args:
-            k ():  number of folds
         """
-        if offset_lenght is None:
-            offset_lenght = pd.Timedelta(days=0)
-        # Own fold method
-        self.folds = pd.DataFrame(columns=["start_date", "end_date"])
-        print(self.start_date)
-        start_folds = self.start_date + offset_lenght
-        len_folds = (self.duration - offset_lenght) / ( (k + 1))
-        for index_fold in range(k):
-            end_fold = start_folds + ((index_fold + 1) * len_folds)
-            index_end_fold = np.argmin(np.abs(self.index_dates - end_fold))
-            end_fold = self.index_dates[index_end_fold]
-            start_fold = end_fold - self.FCeV_config.training_length
-            if start_fold < self.start_date:
-                start_fold = self.start_date
-            self.folds.loc[index_fold] = [start_fold, end_fold]
-
-    def process_fold(self, index_fold):
-        """Function to prodcess each fold
 
         Args:
-            index_fold (): index of the folds, has to be lower than the number of folds in get folds
+            FCeV_config ():
+            Darts_FCev_config ():
+            df_input ():
+            df_past_covariates ():
+            df_future_covariates ():
+            df_events ():
+            synthetic_events ():
+        """
+
+        self.FCeV_config = FCeV_config
+        if not isinstance(Darts_FCeV_config, DartsFCeVConfig):
+            raise ValueError("Not valid FCev config file")
+        self.Darts_FCeV_config = Darts_FCeV_config
+        # self.input_series =  darts.TimeSeries.from_dataframe(
+        #     df_input
+        # ) 
+        self.input_series =  self.df_to_ts(df_input)
+        self.n_forecasts = int(self.FCeV_config.forecast_length / self.FCeV_config.freq)
+        self.n_lags = int(self.FCeV_config.input_length / self.FCeV_config.freq)
+        self.past_covariates = self.df_to_ts(df_past_covariates)
+        self.future_covariates = self.df_to_ts(df_future_covariates)
+        self.df_events = df_events
+        # Convert from wide format to long format
+        if synthetic_events.empty:
+            self.synthetic_events = None  # self.get_synthetic_events()
+        else:
+            self.synthetic_events = self.prepare_synthetic_events(synthetic_events, 5)
+
+
+        self.index_date = df_input.index
+        self.folds = pd.DataFrame(columns=["start_date", "end_date"])
+    def df_to_ts(self, df):
+        if df.empty:
+            return None
+        else:
+            df = df.fillna( method= "bfill")
+            df = df.fillna(method= "ffill")
+            df = df.fillna(0.0)
+            ts =  darts.TimeSeries.from_dataframe(df, fill_missing_dates=True, freq=self.FCeV_config.freq)
+            ts =  darts.utils.missing_values.fill_missing_values(ts , fill=0.0)
+            return ts
+    def start_date(self):
+        return self.input_series.start_time()
+
+    def duration(self):
+        return self.input_series.duration
+    def preprocess_series(self, series, drop_before,drop_after, split_after):
+        series = series.astype("float32")
+        # filler = transformers.MissingValuesFiller()
+        # series = filler.transform(series, method = "bfill", limit = 1000)
+        series = series.drop_before(drop_before)
+        
+        series = series.drop_after(drop_after)
+        scaler = transformers.Scaler()
+        train_series, val_series = series.split_before(split_after)
+        train_series = scaler.fit_transform(train_series)
+        val_series = scaler.transform(val_series)
+        series = scaler.transform(series)
+        return train_series, val_series, series, scaler
+    def prepare_synthetic_events(self,synthetic_events,  periods):
+        if synthetic_events is None:
+            raise ValueError("Syntheticevents not valid")
+        all_dict = {}
+        for idx, synthetic_event in synthetic_events.iterrows():
+            event_offset = [
+                int(self.n_forecasts/ (periods + 1) * x)
+                for x in range(1, periods + 1)
+            ]
+            current_dict = {}
+            for idx_offset in event_offset:
+                current_event = pd.DataFrame(0.0, index=np.arange(self.n_forecasts), columns = synthetic_events.columns)
+                current_event.iloc[idx_offset] = synthetic_event
+                current_dict[f"{idx_offset}"] = current_event
+            all_dict[f"SYNTH_{idx}"] = current_dict
+        return all_dict
+
+    def process_forecast(self, start_datetime, end_datetime):
+        """Train the model and process a forecast
+
+        Args:
+            start_datetime (): start time for the trining data set
+            end_datetime ():
 
         Returns:
-            df_forecast (): Dataframe with the forecast
-            df_uncertainty (): Dataframe with the values of uncertainty of that forecast
 
         """
-        if self.folds is None:
-            raise ValueError("Folds hasnt been created yet")
-        if index_fold >= len(self.folds):
-            raise ValueError(f"Index folds exceed number of folds: {len(self.folds)}")
-        start_fold, end_fold = self.folds.iloc[index_fold]
-        # df_forecast, df_uncertainty = 
-        return self.FCeV_model.process_forecast(
-            start_fold, end_fold
+        start_forecast_time = end_datetime - self.FCeV_config.forecast_length
+        question_mark_start = (
+            start_forecast_time - self.FCeV_config.question_mark_length
         )
-        return df_forecast, df_uncertainty
+        print(question_mark_start)
 
-    def plot_result(self, model, df):
-        future = model.make_future_dataframe(
-            df, periods=60 // 5 * 24 * 7, n_historic_predictions=True
+        df_events = self.df_events.iloc[self.df_events.index < question_mark_start]
+        df_events = self.df_events.reindex(self.index_date).fillna(0.0)
+        series_ts = self.df_to_ts(df_events)
+
+        # Takes events up to that point
+        train_base, val_base, series_base, scaler_base = self.preprocess_series(
+            self.input_series, start_datetime, end_datetime, start_forecast_time
         )
-        forecast = model.predict(future)
-        fig = model.plot(
-            forecast[forecast["ID"] == "noa1"]
-        )  # fig_comp = m.plot_components(forecast)
-        fig_param = model.plot_parameters()
-    def get_metrics_from_fc(self, df_forecast, metrics):
-        if metrics is METRICS.CoV:
-            mean_pred_values = df_forecast["current"].mean().mean()
-            return (
-                df_forecast["current"]
-                .sub(df_forecast["pred"])
-                .pow(2)
-                .mean(axis=0)
-                .pow(1 / 2)
-                .mean()
-                / mean_pred_values
-            ) * 100
+        if self.past_covariates is not None:
+            (
+                train_past_covariate,
+                _,
+                series_past_covariate,
+                scaler_past_covariate,
+            ) = self.preprocess_series(self.past_covariates,  start_datetime, end_datetime, start_forecast_time)
         else:
-            raise NonParametricError("Not Implemented Yet")
+            train_past_covariate = None
+            val_past_covariate = None
+            series_past_covariate = None
+        if self.future_covariates is not None:
+           (
+                train_future_covariate,
+                _,
+                series_future_covariate,
+                scaler_future_covariate,
+            ) = self.preprocess_series(self.future_covariates, start_datetime, end_datetime, start_forecast_time)
+        else:
+            train_future_covariate = None
+            val_future_covariate = None
+            series_future_covariate = None
+
+        (
+                train_events,
+                val_events,
+                series_events,
+                scaler_events,
+        ) = self.preprocess_series(series_ts, start_datetime, end_datetime, start_forecast_time)
+        model = self.create_dart_model()
+        training_val = series_base[-(len(val_base) + self.n_lags):]
+        model = self.fit(model, train_base,training_val, train_past_covariate, train_future_covariate, train_events )
+        # Compute just one long forecast
+        df_forecast, df_uncertainty = self.test(model, val_base, series_past_covariate, series_future_covariate, series_events,scaler_events)
+        return df_forecast, df_uncertainty   
     def save_df(self, filename):
         path = Path(filename + ".csv")
         for index in range(100):
@@ -181,6 +225,112 @@ class FCeV:
             else:
                 self.npw_df.to_csv(path)
                 break
+    def fit(self, model,train_base,val_series, train_past_covariate, train_future_covariate, train_events ):
+        if isinstance(self.Darts_FCeV_config.DartsModelConfig, TCNDartsFCeVConfig):
+            if train_past_covariate is not None:
+                past_covariates_with_events = train_past_covariate.concatenate(train_events, axis = 1)
+                model.fit(train_base, val_series= val_series,val_past_covariates = past_covariates_with_events, past_covariates=past_covariates_with_events, verbose = self.FCeV_config.verbose)
+            else:
+
+                past_covariates_with_events = train_events
+                model.fit(train_base, val_series= val_series, past_covariates=past_covariates_with_events,verbose = self.FCeV_config.verbose )
+            return model 
+        else:
+            raise ValueError("ModelNotImplemented") 
+
+    def create_dart_model(self):
+        early_stopper = EarlyStopping("train_loss", min_delta=0.0001, patience=10)
+        if self.Darts_FCeV_config.use_gpu == True:
+            trainer_kwargs = {
+                "accelerator": "gpu",
+                 "callbacks": [early_stopper],
+            }
+        else:
+            trainer_kwargs = {
+                "accelerator": "cpu",
+                 "callbacks": [early_stopper],
+            }
+        # trainer_config = {"accelerator":"gpu"}
+        if isinstance(self.Darts_FCeV_config.DartsModelConfig, TCNDartsFCeVConfig):
+            model = TCNModel(
+                input_chunk_length=self.n_lags,
+                output_chunk_length=self.n_forecasts,
+                dropout=self.Darts_FCeV_config.dropout,
+                n_epochs=self.Darts_FCeV_config.n_epochs,
+                dilation_base=self.Darts_FCeV_config.DartsModelConfig.dilation_base,
+                weight_norm=self.Darts_FCeV_config.DartsModelConfig.weight_norm,
+                kernel_size=self.Darts_FCeV_config.DartsModelConfig.kernel_size,
+                num_filters=self.Darts_FCeV_config.DartsModelConfig.num_filter,
+                force_reset=True,
+                pl_trainer_kwargs=trainer_kwargs,
+                optimizer_cls = torch.optim.Adam,
+                lr_scheduler_cls = torch.optim.lr_scheduler.ReduceLROnPlateau,
+                optimizer_kwargs = {"lr": self.Darts_FCeV_config.learning_rate}
+            )
+        else:
+            raise ValueError("ModelNotImplemented")
+        return model
+
+    def test(self, model, val_series, test_past_covariate, test_future_covariate, test_events, scaler_events):
+        periods = 5
+        forecast_result = {}
+        forecast_uncer = {}
+        df_forecast, df_uncer = self.one_step_test(model, val_series, test_past_covariate, test_future_covariate, test_events)
+        forecast_result["BASE"] = df_forecast
+        forecast_uncer["BASE"] = df_uncer
+        if self.synthetic_events is None:
+            return forecast_result, forecast_uncer
+ 
+        for synth_key, synth_dict in self.synthetic_events.items():
+            offset_forecast = {}
+            offset_uncertainty = {}
+            for offset, df_offset in synth_dict.items():
+                df_synth = df_offset.set_index(val_series.time_index)
+                ts_syhtn = self.df_to_ts(df_synth)
+                if test_future_covariate is None:
+                    ts_syhtn = ts_syhtn.shift(-self.n_forecasts)
+                ts_syhtn = scaler_events.transform(ts_syhtn)
+                before = test_events.drop_after(ts_syhtn.start_time())
+                after = test_events.drop_before(ts_syhtn.end_time())
+                ts_syhtn = before.append(ts_syhtn).append(after)
+                ts_syhtn = ts_syhtn.astype("float32")
+                df_forecast, df_uncertainty = self.one_step_test(model, val_series, test_past_covariate, test_future_covariate, ts_syhtn)
+                offset_forecast[f"{offset}"] = df_forecast
+                offset_uncertainty[f"{offset}"] = df_uncertainty
+            forecast_result[f"{synth_key}"] = offset_forecast
+            forecast_uncer[f"{synth_key}"] = offset_uncertainty
+
+        return forecast_result, forecast_uncer
+        
+    def one_step_test(self, model, base, past_covariate, future_covariate, events):
+        if future_covariate is None:
+            if past_covariate is None:
+                past_covariate = events
+            else: 
+                past_covariate = past_covariate.concatenate(events, axis = 1)
+
+        forecast = model.predict(self.n_forecasts, future_covariates = future_covariate, past_covariates = past_covariate, verbose = False)
+        results = base.slice_intersect(forecast)
+
+        df_forecast = pd.concat([results.pd_dataframe(), forecast.pd_dataframe()], keys= ["current", "pred"], axis = 1)
+
+        return df_forecast, df_forecast
+
+    # Predict for differents hours offset and differents event offset
+    def predict_with_offset_hours(self, start_day, hours_offsets, event_offsets):
+        for hours_offset in hours_offsets:
+            start_forecast = start_day + relativedelta(hours=+hours_offset)
+            self.predict_with_offset_events(start_forecast, event_offsets)
+
+    def predict_with_offset_events(self, start_forecast, event_offsets):
+        for event_offset in event_offsets:
+            config_fc = ConfigForecast(
+                start_forecast=start_forecast, offset_event=event_offset
+            )
+            test_metrics = self.process_forecast(config_fc)
+            print(
+                str(start_forecast) + " " + str(event_offset) + " " + str(test_metrics)
+            )
 
     def get_df_from_folder(self, dir_path):
         # Iterate directory

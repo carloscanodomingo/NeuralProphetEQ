@@ -61,7 +61,6 @@ def get_eq_filtered(
     y_last = np.zeros(len(x))
     dist_dif = (dist_max * dist_perct) / (num_classes)
     for index_classes in range(num_classes, 0, -1):
-
         d2 = dist_start + (index_classes) * dist_delta
         d1 = dist_start + dist_dif * (index_classes - 1)
         (A, B) = get_coef(d1, d2, m1, m2)
