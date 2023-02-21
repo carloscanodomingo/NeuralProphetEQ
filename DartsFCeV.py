@@ -44,6 +44,7 @@ class DartsFCeVConfig:
     dropout: float
     batch_size: int
     n_epochs: int
+    patience: int
 
 
 @dataclass
@@ -239,7 +240,7 @@ class DartsFCeV:
             raise ValueError("ModelNotImplemented") 
 
     def create_dart_model(self):
-        early_stopper = EarlyStopping("train_loss", min_delta=0.0001, patience=10)
+        early_stopper = EarlyStopping("val_loss", min_delta=0.01, patience=5, mode = "min")
         if self.Darts_FCeV_config.use_gpu == True:
             trainer_kwargs = {
                 "accelerator": "gpu",
@@ -252,6 +253,7 @@ class DartsFCeV:
             }
         # trainer_config = {"accelerator":"gpu"}
         if isinstance(self.Darts_FCeV_config.DartsModelConfig, TCNDartsFCeVConfig):
+            print(f"input chunck: {self.n_lags}")
             model = TCNModel(
                 input_chunk_length=self.n_lags,
                 output_chunk_length=self.n_forecasts,
