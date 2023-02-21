@@ -93,10 +93,16 @@ from FCeV import FCeV, FCeVConfig
     type=int,
     help="patience",
 )
+@click.option(
+    "--forecast_type",
+    default="folds",
+    type=click.Choice(["folds", "iteration"]),
+    help="Set event type",
+)
+@click.option("--total_index", default=12, type=int, help="number of total folds")
+@click.option("--current_index", default=0, help="number of the current fold")
 
-
-@click.option("--total_folds", default=12, type=int, help="number of total folds")
-@click.option("--current_fold", default=0, help="number of the current fold")
+@click.option("--offset_start", default=365 * 2, type=int, help="number days for the offset")
 def configure(
     epochs,
     verbose,
@@ -109,9 +115,11 @@ def configure(
     weight_norm,
     kernel_size,
     num_filter,
-    total_folds,
-    current_fold,
+    total_index,
+    current_index,
+    forecast_type,
     patience,
+    offset_start
 ):
     
     
@@ -129,6 +137,7 @@ def configure(
 
 
     datapath = os.environ.get("DATA_PATH")
+    output_path = "results/"
     freq = timedelta(minutes=30)
 
     # df_GNSSTEC = pd.read_pickle("df_GNSSTEC.pkl")
@@ -184,15 +193,22 @@ def configure(
         sys.stdout = open(os.devnull, "w")
         sys.stderr = open(os.devnull, "w")
     df_synth = prepare_EQ(synthetic_events, config_events)  
-    current_fcev = FCeV(FCev_config, darts_FCeV_config, df_GNSSTEC, df_covariate, pd.DataFrame(),df_events, df_synth)
-    current_fcev.create_folds(k=total_folds, offset_lenght=pd.Timedelta(days=180))
-    df_fore, df_uncer = current_fcev.process_fold(current_fold)
+    current_fcev = FCeV(FCev_config, darts_FCeV_config, df_GNSSTEC, df_covariate, pd.DataFrame(),df_events, output_path, df_synth)
+    if forecast_type == "folds":
+        current_fcev.create_folds(k=total_index, offset_lenght=pd.Timedelta(days=180))
+        df_fore, df_uncer = current_fcev.process_fold(current_index)
 
-    cov_result = current_fcev.get_metrics_from_fc(df_fore["BASE"], METRICS.CoV)
-    sys.stdout = sys.__stdout__
-    sys.stderr = sys.__stderr__
-    print(str(cov_result) + "\n")
-    sys.exit(0)
+        cov_result = current_fcev.get_metrics_from_fc(df_fore["BASE"], METRICS.CoV)
+        sys.stdout = sys.__stdout__
+        sys.stderr = sys.__stderr__
+        print(str(cov_result) + "\n")
+        sys.exit(0)
+    elif forecast_type == "iteration":
+        offset_start=pd.Timedelta(days = offset_start  )
+        current_fcev.create_iteration(offset_start, total_index)
+        df_fore, df_uncer = current_fcev.process_iteration(current_index)
+        current_fcev.save_results(df_fore)
+        sys.exit(0)
 
 
 if __name__ == "__main__":

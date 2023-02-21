@@ -13,7 +13,7 @@ import os
 import dateutil.parser
 from pathlib import Path
 from enum import Enum
-
+import pickle
 from IPython.display import display
 from IPython.core.display import HTML
 import json
@@ -76,6 +76,7 @@ class FCeV:
         df_past_covariates,
         df_future_covariates,
         df_events,
+        output_path,
         synthetic_events=pd.DataFrame(),
     ):
         if not isinstance(FCeV_config, FCeVConfig):
@@ -97,9 +98,12 @@ class FCeV:
         else:
             raise KeyError("Model not implemented")
         self.start_date = self.FCeV_model.start_date()
+        self.output_path = output_path 
         self.duration = self.FCeV_model.duration()
+        self.end_date = self.start_date + self.duration
         self.FCeV_config = FCeV_config
         self.folds = None
+        self.iterations = None
         self.index_dates = df_input.reset_index()["ds"]
 
 
@@ -142,20 +146,41 @@ class FCeV:
             raise ValueError(f"Index folds exceed number of folds: {len(self.folds)}")
         start_fold, end_fold = self.folds.iloc[index_fold]
         # df_forecast, df_uncertainty = 
-        return self.FCeV_model.process_forecast(
+        df_forecast, df_uncertainty = self.FCeV_model.process_forecast(
             start_fold, end_fold
         )
         return df_forecast, df_uncertainty
 
-    def plot_result(self, model, df):
-        future = model.make_future_dataframe(
-            df, periods=60 // 5 * 24 * 7, n_historic_predictions=True
+    def process_iteration(self, index_fold):
+
+        if self.iterations is None:
+            raise ValueError("Iterations hasnt been created yet")
+        if index_fold >= len(self.iterations):
+            raise ValueError(f"Index index_iteration exceed number of iterations: {len(self.iterations)}")
+        start_fold, end_fold = self.iterations.iloc[index_fold]
+        # df_forecast, df_uncertainty = 
+        df_forecast, df_uncertainty = self.FCeV_model.process_forecast(
+            start_fold, end_fold
         )
-        forecast = model.predict(future)
-        fig = model.plot(
-            forecast[forecast["ID"] == "noa1"]
-        )  # fig_comp = m.plot_components(forecast)
-        fig_param = model.plot_parameters()
+        return df_forecast, df_uncertainty
+
+    def create_iteration(self, offset_lenght, n_iteration):
+        self.iterations = pd.DataFrame(columns=["start_date", "end_date"])
+        len_iteration = self.FCeV_config.forecast_length
+        print(f"{self.duration} __ {self.FCeV_config.forecast_length}")
+        max_number_iteration = int((self.duration - offset_lenght - self.FCeV_config.forecast_length) // len_iteration)
+        if n_iteration is None:
+            n_iteration = max_number_iteration
+        else:
+            n_iteration = n_iteration if max_number_iteration > n_iteration else max_number_iteration
+        for index_iter in range(n_iteration):
+            end_fold = self.start_date + offset_lenght  + (index_iter * self.FCeV_config.forecast_length)
+            index_end_fold = np.argmin(np.abs(self.index_dates - end_fold))
+            end_fold = self.index_dates[index_end_fold]
+            start_fold = end_fold - self.FCeV_config.training_length
+            if start_fold < self.start_date:
+                start_fold = self.start_date
+            self.iterations.loc[index_iter] = [start_fold, end_fold]
     def get_metrics_from_fc(self, df_forecast, metrics):
         if metrics is METRICS.CoV:
             mean_pred_values = df_forecast["current"].mean().mean()
@@ -169,26 +194,15 @@ class FCeV:
                 / mean_pred_values
             ) * 100
         else:
-            raise NonParametricError("Not Implemented Yet")
-    def save_df(self, filename):
-        path = Path(filename + ".csv")
-        for index in range(100):
-            if path.is_file():
-                path = Path(filename + "_" + str(index + 1) + ".csv")
-            else:
-                self.npw_df.to_csv(path)
-                break
-
-    def get_df_from_folder(self, dir_path):
-        # Iterate directory
-        df_output = pd.DataFrame()
-        for file in Path(dir_path).glob("*.csv"):
-            with file as f:
-                self.npw_df = pd.concat([self.npw_df, pd.read_csv(f)])
-
-    def remove_experiments(self, case):
-        self.npw_df = self.npw_df.loc[self.npw_df["expected_event"] != case]
-
+            raise ValueError("Not Implemented Yet")
+  
+    def save_results(self, df_forecast, df_uncertainty = None):
+        file_name = df_forecast["BASE"].index[0].strftime("%Y_%m_%d_%H_%M_%S")
+        with open(f"{self.output_path}df_forecast_{file_name}", 'wb') as f:
+            pickle.dump(df_forecast, f)
+        if df_uncertainty is not None:
+            with open(f"{self.output_path}df_uncertainty{file_name}", 'wb') as f:
+                pickle.dump(df_uncertainty, f)
     def get_binary_perform(self, metrics, min_limit, max_limit, config_events=None):
         df = self.get_binary_results(metrics, min_limit, max_limit, config_events)
         # Get the confusion matrix

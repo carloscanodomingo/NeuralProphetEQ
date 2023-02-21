@@ -7,7 +7,7 @@
 ## value on the command line).
 
 ## Directory where the programs will be run.
-execDir = "./irace"
+#execDir = "./irace"
 
 ## File that contains the description of the parameters of the target
 ## algorithm.
@@ -144,7 +144,7 @@ maxExperiments = 3000
 
 ## Debug level of the output of irace. Set this to 0 to silence all debug
 ## messages. Higher values provide more verbose debug messages.
-debugLevel = 0
+debugLevel = 5
 
 ## Seed of the random number generator (by default, generate a random seed).
 # seed = NA

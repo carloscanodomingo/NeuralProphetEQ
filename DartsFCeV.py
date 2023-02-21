@@ -240,7 +240,7 @@ class DartsFCeV:
             raise ValueError("ModelNotImplemented") 
 
     def create_dart_model(self):
-        early_stopper = EarlyStopping("val_loss", min_delta=0.01, patience=5, mode = "min")
+        early_stopper = EarlyStopping("val_loss", min_delta=0.0001, patience=self.Darts_FCeV_config.patience, mode = "min")
         if self.Darts_FCeV_config.use_gpu == True:
             trainer_kwargs = {
                 "accelerator": "gpu",
