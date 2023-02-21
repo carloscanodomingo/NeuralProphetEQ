@@ -13,3 +13,4 @@ sdv==0.18.0
 tqdm==4.64.1
 typing_extensions==4.3.0
 unique-names-generator==1.0.2
+darts=0.23.1
