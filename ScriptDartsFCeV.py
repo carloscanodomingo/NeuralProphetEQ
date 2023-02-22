@@ -42,6 +42,12 @@ from DartsFCeV import DartsFCeVConfig, TCNDartsFCeVConfig
 from FCeV import FCeV, FCeVConfig
 
 
+@click.option(
+    "--out_path", help="path to results folder", required=True
+)
+@click.option(
+    "--data_path", help="path to data folder", required=True
+)
 @click.command(
     context_settings=dict(ignore_unknown_options=True, allow_extra_args=True)
 )
@@ -119,7 +125,9 @@ def configure(
     current_index,
     forecast_type,
     patience,
-    offset_start
+    offset_start,
+    data_path,
+    out_path
 ):
     
     
@@ -136,14 +144,12 @@ def configure(
 
 
 
-    datapath = os.environ.get("DATA_PATH")
-    output_path = "results/"
     freq = timedelta(minutes=30)
 
     # df_GNSSTEC = pd.read_pickle("df_GNSSTEC.pkl")
     # df_covariate = pd.read_pickle("df_covariate.pkl")
     # df_eq = pd.read_pickle("df_eq.pkl")
-    df_GNSSTEC, df_covariate, df_eq = prepare_ion_data(datapath, "GRK", freq)
+    df_GNSSTEC, df_covariate, df_eq = prepare_ion_data(data_path, "GRK", freq)
     df_regressor = df_GNSSTEC.reset_index()
     df_other = df_covariate
     df_events = prepare_EQ(df_eq, config_events)    
@@ -193,7 +199,7 @@ def configure(
         sys.stdout = open(os.devnull, "w")
         sys.stderr = open(os.devnull, "w")
     df_synth = prepare_EQ(synthetic_events, config_events)  
-    current_fcev = FCeV(FCev_config, darts_FCeV_config, df_GNSSTEC, df_covariate, pd.DataFrame(),df_events, output_path, df_synth)
+    current_fcev = FCeV(FCev_config, darts_FCeV_config, df_GNSSTEC, df_covariate, pd.DataFrame(),df_events, out_path, df_synth)
     if forecast_type == "folds":
         current_fcev.create_folds(k=total_index, offset_lenght=pd.Timedelta(days=180))
         df_fore, df_uncer = current_fcev.process_fold(current_index)

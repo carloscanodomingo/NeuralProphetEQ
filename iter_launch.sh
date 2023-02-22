@@ -19,11 +19,11 @@ qsub_job() {
 #!/bin/bash --login
 #$ -t 1-$nruns
 #$ -N $JOBNAME
-# -pe $PARALLEL_ENV $NB_PARALLEL_PROCESS 
+#$ -pe $PARALLEL_ENV $NB_PARALLEL_PROCESS 
 # -l ivybridge
 #$ -l mem256
-# -M carlos.cano@manchester.ac.uk
-# -m ase
+#$ -M carlos.cano@manchester.ac.uk
+#$ -m ase
 #      b     Mail is sent at the beginning of the job.
 #      e     Mail is sent at the end of the job.
 #      a     Mail is sent when the job is aborted or rescheduled.
@@ -36,7 +36,7 @@ module load apps/binapps/anaconda3/2021.11
 conda activate neuralprophet
 module load apps/gcc/R/4.0.2
 echo "running: ${BINDIR}/$RUNNER \$((\$SGE_TASK_ID - 1))"
-${BINDIR}/$RUNNER --forecast_type=iteration --total_index=150  --historic_lenght=15 --training_lenght_days=120 --learning_rate=2 --dropout=0.4 --batch_size=600 --n_epochs=300 --patience=20 --dilation_base=2 --weight_norm=1 --kernel_size=32 --num_filter=6 --verbose=0  --current_index=\$((\$SGE_TASK_ID - 1))
+${BINDIR}/$RUNNER --data_path=/mnt/hum01-home01/ambs/y06068cc/data/ --out_path=/mnt/hum01-home01/ambs/y06068cc/output/results --forecast_type=iteration --total_index=150  --historic_lenght=15 --training_lenght_days=120 --learning_rate=2 --dropout=0.4 --batch_size=600 --n_epochs=300 --patience=20 --dilation_base=2 --weight_norm=1 --kernel_size=32 --num_filter=6 --verbose=0  --current_index=\$((\$SGE_TASK_ID - 1))
 EOF
 }
 
