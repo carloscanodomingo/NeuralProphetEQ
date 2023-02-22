@@ -31,9 +31,9 @@ from DartsFCeV import DartsFCeVConfig, TCNDartsFCeVConfig
 from FCeV import FCeV, FCeVConfig
 
 
-@click.argument("seed", nargs = 1, type = int)
-@click.argument("n_iteration", nargs = 1)
-@click.argument("config", nargs = 1)
+@click.argument("seed", nargs = 1, type = int, default = 100)
+@click.argument("n_iteration", nargs = 1, default = 100)
+@click.argument("config", nargs = 1, default = "NO_NAME")
 @click.option("--out_path", help="path to results folder", required=True)
 @click.option("--data_path", help="path to data folder", required=True)
 @click.command(
@@ -110,6 +110,7 @@ def configure(
     seed,
 ):
     # for reproducibility
+    torch.set_num_threads(1)
     torch.manual_seed(seed)
     np.random.seed(seed)
     ConfigEQ_d = {
