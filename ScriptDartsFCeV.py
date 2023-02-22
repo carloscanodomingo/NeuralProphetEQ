@@ -50,7 +50,6 @@ from FCeV import FCeV, FCeVConfig
 )
 @click.option("--verbose", default=False, type=bool, help="verbose")
 @click.option("--epochs", default=300, type=int, help="number of epochs")
-# @click.option("--datapath", help="Enter datapath")
 @click.option("--historic_lenght", default=5, help="Enter historic_lenght")
 @click.option(
     "--training_lenght_days",
@@ -189,7 +188,7 @@ def configure(
 
     FCev_config = FCeVConfig(**FCev_config)
 
-    synthetic_events = pd.read_pickle(datapath + "synthetic_raw.pkl")
+    synthetic_events = pd.read_pickle(data_path + "synthetic_raw.pkl")
 
     # Read SR and EQ data
     if verbose == 0:
