@@ -1,7 +1,7 @@
 #!/bin/bash --login
 #$ -cwd
 #$ -pe smp.pe 2       # Each task will use 4 cores in this example
-#$ -t 1-300          # A job-array with 1000 "tasks", numbered 1...1000
+#$ -t 1-2          # A job-array with 1000 "tasks", numbered 1...1000
 
 # My OpenMP program will read this variable to get how many cores to use.
 # $NSLOTS is automatically set to the number specified on the -pe line above.

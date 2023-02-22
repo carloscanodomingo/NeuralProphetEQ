@@ -8,9 +8,6 @@ import warnings
 import os
 warnings.filterwarnings("ignore")
 import logging
-datapath = os.environ.get("DATA_PATH")
-if datapath == None:
-    raise KeyError("Enviromental variable data path has to be declared")
 from datetime import datetime, timedelta
 freq = timedelta(minutes=30)
 logging.disable(logging.CRITICAL)
