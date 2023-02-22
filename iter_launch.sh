@@ -22,7 +22,7 @@ qsub_job() {
 # -pe $PARALLEL_ENV $NB_PARALLEL_PROCESS 
 # -l ivybridge
 #$ -l mem256
-#$ -M manuel.lopez-ibanez@manchester.ac.uk
+# -M carlos.cano@manchester.ac.uk
 # -m ase
 #      b     Mail is sent at the beginning of the job.
 #      e     Mail is sent at the end of the job.
@@ -36,19 +36,11 @@ module load apps/binapps/anaconda3/2021.11
 conda activate neuralprophet
 module load apps/gcc/R/4.0.2
 echo "running: ${BINDIR}/$RUNNER \$((\$SGE_TASK_ID - 1))"
-${BINDIR}/$RUNNER --current_index=\$((\$SGE_TASK_ID - 1))
+${BINDIR}/$RUNNER --forecast_type=iteration --total_index=150  --historic_lenght=15 --training_lenght_days=120 --learning_rate=2 --dropout=0.4 --batch_size=600 --n_epochs=300 --patience=20 --dilation_base=2 --weight_norm=1 --kernel_size=32 --num_filter=6 --verbose=0  --current_index=\$((\$SGE_TASK_ID - 1))
 EOF
 }
-@click.option(
-    "--forecast_type",
-    default="folds",
-    type=click.Choice(["folds", "iteration"]),
-    help="Set event type",
-)
-@click.option("--current_index", default=0, help="number of the current fold")
 
 
-nruns=10
+nruns=149
 LAUNCHER=qsub_job
-#LAUNCHER=launch_local
-$LAUNCHER "ScriptDartsFCeV.py --forecast_type=iteration --total_index=100   --historic_lenght=15 --training_lenght_days=56 --learning_rate=3 --dropout=0.0814 --batch_size=600 --n_epochs=300 --patience=9 --dilation_base=1 --weight_norm=1 --kernel_size=6 --num_filter=6 --verbose=0" $nruns
+$LAUNCHER ScriptDartsFCeV.py $nruns
