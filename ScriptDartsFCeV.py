@@ -193,7 +193,7 @@ def configure(
     # Read SR and EQ data
     if verbose == 0:
         sys.stdout = open(os.devnull, "w")
-        sys.stderr = open(os.devnull, "w")
+        # sys.stderr = open(os.devnull, "w")
     df_synth = prepare_EQ(synthetic_events, config_events)  
     current_fcev = FCeV(FCev_config, darts_FCeV_config, df_GNSSTEC, df_covariate, pd.DataFrame(),df_events, out_path, df_synth)
     if forecast_type == "folds":
