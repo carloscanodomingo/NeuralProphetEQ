@@ -249,7 +249,7 @@ class DartsFCeV:
         else:
             trainer_kwargs = {
                 "accelerator": "cpu",
-                "devices" : 2,
+                "devices" : 1,
                  "callbacks": [early_stopper],
             }
         # trainer_config = {"accelerator":"gpu"}

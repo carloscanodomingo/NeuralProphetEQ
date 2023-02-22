@@ -3,48 +3,39 @@
 %load_ext autoreload
 %autoreload 2
 """
-from NPw_aux import prepare_ion_data
 import warnings
 import os
+
 warnings.filterwarnings("ignore")
 import logging
 from datetime import datetime, timedelta
-freq = timedelta(minutes=30)
-logging.disable(logging.CRITICAL)
 
+logging.disable(logging.CRITICAL)
 import pandas as pd
 import numpy as np
 import logging
 import pandas as pd
-
-from NPw import  ConfigEQ
-
+from NPw import ConfigEQ
 import sys
-import numpy as np
-import pandas as pd
-
-import pandas as pd
-from NPw_aux import prepare_EQ, ConfigEQ
-
-from FCeV import METRICS
+from NPw_aux import prepare_EQ, ConfigEQ, prepare_ion_data
+import click
+import torch
 
 
 from FCeV import FCeV, FCeVConfig
+
 # click_example.py
-import sys
-import click
 
 from DartsFCeV import DartsFCeVConfig, TCNDartsFCeVConfig
 
 from FCeV import FCeV, FCeVConfig
 
 
-@click.option(
-    "--out_path", help="path to results folder", required=True
-)
-@click.option(
-    "--data_path", help="path to data folder", required=True
-)
+@click.argument("seed", nargs = 1, type = int)
+@click.argument("n_iteration", nargs = 1)
+@click.argument("config", nargs = 1)
+@click.option("--out_path", help="path to results folder", required=True)
+@click.option("--data_path", help="path to data folder", required=True)
 @click.command(
     context_settings=dict(ignore_unknown_options=True, allow_extra_args=True)
 )
@@ -57,10 +48,6 @@ from FCeV import FCeV, FCeVConfig
     help="Enter the training_lenght_days",
     type=int,
 )
-
-        
-        
-        
 @click.option("--dropout", default=0.1, help="dropout")
 @click.option(
     "--batch_size",
@@ -68,15 +55,8 @@ from FCeV import FCeV, FCeVConfig
     help="batch_size",
 )
 @click.option("--learning_rate", default=1e-3, help="learning_rate")
-
-
-        
-@click.option(
-    "--dilation_base", default=2, type=int, help="dilation_base"
-)
-@click.option(
-    "--weight_norm", default=True, type=bool, help="weight_norm"
-)
+@click.option("--dilation_base", default=2, type=int, help="dilation_base")
+@click.option("--weight_norm", default=True, type=bool, help="weight_norm")
 @click.option(
     "--kernel_size",
     default=16,
@@ -103,8 +83,9 @@ from FCeV import FCeV, FCeVConfig
 )
 @click.option("--total_index", default=12, type=int, help="number of total folds")
 @click.option("--current_index", default=0, help="number of the current fold")
-
-@click.option("--offset_start", default=365 * 2, type=int, help="number days for the offset")
+@click.option(
+    "--offset_start", default=365 * 2, type=int, help="number days for the offset"
+)
 def configure(
     epochs,
     verbose,
@@ -123,10 +104,14 @@ def configure(
     patience,
     offset_start,
     data_path,
-    out_path
+    out_path,
+    config,
+    n_iteration,
+    seed,
 ):
-    
-    
+    # for reproducibility
+    torch.manual_seed(seed)
+    np.random.seed(seed)
     ConfigEQ_d = {
         "dist_start": 1000,
         "dist_delta": 3000,
@@ -137,9 +122,6 @@ def configure(
     }
     config_events = ConfigEQ(**ConfigEQ_d)
 
-
-
-
     freq = timedelta(minutes=30)
 
     # df_GNSSTEC = pd.read_pickle("df_GNSSTEC.pkl")
@@ -148,7 +130,7 @@ def configure(
     df_GNSSTEC, df_covariate, df_eq = prepare_ion_data(data_path, "GRK", freq)
     df_regressor = df_GNSSTEC.reset_index()
     df_other = df_covariate
-    df_events = prepare_EQ(df_eq, config_events)    
+    df_events = prepare_EQ(df_eq, config_events)
 
     forecast_length = timedelta(hours=24)
     question_mark_length = timedelta(hours=24)
@@ -163,19 +145,21 @@ def configure(
         "dilation_base": dilation_base,
         "weight_norm": weight_norm,
         "kernel_size": kernel_size,
-        "num_filter": num_filter}
+        "num_filter": num_filter,
+    }
 
     TCN_darts_FCeV_config = TCNDartsFCeVConfig(**TCN_darts_FCeV_config)
 
     darts_FCev_config = {
         "DartsModelConfig": TCN_darts_FCeV_config,
-        "dropout":dropout,
-        "n_epochs":epochs,
-        "batch_size":batch_size,
-        "learning_rate": 1/10**learning_rate,
+        "dropout": dropout,
+        "n_epochs": epochs,
+        "batch_size": batch_size,
+        "learning_rate": 1 / 10**learning_rate,
         "use_gpu": False,
         "event_type": "Non-Binary",
-        "patience": patience    }
+        "patience": patience,
+    }
     darts_FCeV_config = DartsFCeVConfig(**darts_FCev_config)
     FCev_config = {
         "freq": freq,
@@ -183,7 +167,7 @@ def configure(
         "question_mark_length": question_mark_length,
         "training_length": training_lenght,
         "verbose": True,
-        "input_length": historic_lenght
+        "input_length": historic_lenght,
     }
 
     FCev_config = FCeVConfig(**FCev_config)
@@ -194,8 +178,17 @@ def configure(
     if verbose == 0:
         sys.stdout = open(os.devnull, "w")
         # sys.stderr = open(os.devnull, "w")
-    df_synth = prepare_EQ(synthetic_events, config_events)  
-    current_fcev = FCeV(FCev_config, darts_FCeV_config, df_GNSSTEC, df_covariate, pd.DataFrame(),df_events, out_path, df_synth)
+    df_synth = prepare_EQ(synthetic_events, config_events)
+    current_fcev = FCeV(
+        FCev_config,
+        darts_FCeV_config,
+        df_GNSSTEC,
+        df_covariate,
+        pd.DataFrame(),
+        df_events,
+        out_path,
+        df_synth,
+    )
     if forecast_type == "folds":
         current_fcev.create_folds(k=total_index, offset_lenght=pd.Timedelta(days=180))
         df_fore, df_uncer = current_fcev.process_fold(current_index)
@@ -206,7 +199,7 @@ def configure(
         print(str(cov_result) + "\n")
         sys.exit(0)
     elif forecast_type == "iteration":
-        offset_start=pd.Timedelta(days = offset_start  )
+        offset_start = pd.Timedelta(days=offset_start)
         current_fcev.create_iteration(offset_start, total_index)
         df_fore, df_uncer = current_fcev.process_iteration(current_index)
         current_fcev.save_results(df_fore)
