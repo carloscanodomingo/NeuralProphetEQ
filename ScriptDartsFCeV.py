@@ -184,16 +184,15 @@ def configure(
         darts_FCeV_config,
         df_GNSSTEC,
         df_covariate,
-        pd.DataFrame(),
         df_events,
         out_path,
         df_synth,
     )
     if forecast_type == "folds":
-        current_fcev.create_folds(k=total_index, offset_lenght=pd.Timedelta(days=180))
+        current_fcev.create_folds(k=total_index, offset_lenght=pd.Timedelta(days=offset_start, hours = 12))
         df_fore, df_uncer = current_fcev.process_fold(current_index)
 
-        cov_result = current_fcev.get_metrics_from_fc(df_fore["BASE"], METRICS.CoV)
+        cov_result = current_fcev.get_metrics_from_fc(df_fore["BASE"], METRICS.RMSE)
         sys.stdout = sys.__stdout__
         sys.stderr = sys.__stderr__
         print(str(cov_result) + "\n")
