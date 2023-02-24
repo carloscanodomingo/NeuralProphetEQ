@@ -23,11 +23,21 @@ import torch
 import darts
 from darts.dataprocessing import transformers
 
-from darts.models import TCNModel
+from darts.models import TCNModel, TFTModel
 
 # from FCeV import FCeVConfig
+covariate_types = {"Future", "Past"}
+class DartModelMetaClass(type):
+    """ Metaclass to force Model class to contains specific attributes """
+    def __new__(cls, name, bases, dct):
+        if "covariate_type" not in dct:
+            raise TypeError("Covariate type has to be define in the dataclass model config")
 
+        if dct["covariate_type"] not in covariate_types:
+            raise ValueError(f"Covariate type has to be one of the following {covariate_types}")
 
+        x = super().__new__(cls, name, bases, dct)
+        return x
 @dataclass
 class DartsFCeVConfig:
     """
@@ -45,10 +55,11 @@ class DartsFCeVConfig:
     batch_size: int
     n_epochs: int
     patience: int
-
+    seed: int
 
 @dataclass
-class TCNDartsFCeVConfig:
+class TCNDartsFCeVConfig(metaclass = DartModelMetaClass):
+    covariate_type = "Past"
     dilation_base: float
     weight_norm: bool
     kernel_size: int
@@ -56,7 +67,8 @@ class TCNDartsFCeVConfig:
 
 
 @dataclass
-class TFTDartsFCeVConfig:
+class TFTDartsFCeVConfig(metaclass = DartModelMetaClass):
+    covariate_type = "Future"
     lstm_layers: int
     hidden_size: int
     num_attention_heads: int
@@ -65,18 +77,13 @@ class TFTDartsFCeVConfig:
     likelihood: Literal["QuantileRegression"]
 
 
-# Funtion to convert from dataframe to Dart Timeseries
-
-
-
 class DartsFCeV:
     def __init__(
         self,
         FCeV_config,
         Darts_FCeV_config,
         df_input,
-        df_past_covariates,
-        df_future_covariates,
+        df_covariates,
         df_events,
         synthetic_events=pd.DataFrame(),
     ):
@@ -87,7 +94,6 @@ class DartsFCeV:
             Darts_FCev_config ():
             df_input ():
             df_past_covariates ():
-            df_future_covariates ():
             df_events ():
             synthetic_events ():
         """
@@ -102,8 +108,10 @@ class DartsFCeV:
         self.input_series =  self.df_to_ts(df_input)
         self.n_forecasts = int(self.FCeV_config.forecast_length / self.FCeV_config.freq)
         self.n_lags = int(self.FCeV_config.input_length / self.FCeV_config.freq)
-        self.past_covariates = self.df_to_ts(df_past_covariates)
-        self.future_covariates = self.df_to_ts(df_future_covariates)
+        if not df_covariates.empty:
+            self.covariates = self.df_to_ts(df_covariates)
+        else:
+            self.covariates = None
         self.df_events = df_events
         # Convert from wide format to long format
         if synthetic_events.empty:
@@ -114,34 +122,52 @@ class DartsFCeV:
 
         self.index_date = df_input.index
         self.folds = pd.DataFrame(columns=["start_date", "end_date"])
+
+        #Create the Darts model
+        self.model = self.create_dart_model()
+
+
     def df_to_ts(self, df):
-        if df.empty:
-            return None
-        else:
-            df = df.fillna( method= "bfill")
-            df = df.fillna(method= "ffill")
-            df = df.fillna(0.0)
-            ts =  darts.TimeSeries.from_dataframe(df, fill_missing_dates=True, freq=self.FCeV_config.freq)
-            ts =  darts.utils.missing_values.fill_missing_values(ts , fill=0.0)
-            return ts
+        """ Function to convert a pandas dataframe to a Darts timeseries
+    
+        Args:
+            df (): Input dataframe
+
+        Returns:
+           TimeSeries asociate to the Dataframe input 
+        """
+        df.fillna( method= "bfill")
+        df = df.fillna(method= "ffill")
+        df = df.fillna(0.0)
+        ts =  darts.TimeSeries.from_dataframe(df, fill_missing_dates=True, freq=self.FCeV_config.freq)
+        ts =  darts.utils.missing_values.fill_missing_values(ts , fill=0.0)
+        return ts
     def start_date(self):
+        """Function to get the first date of the timeseries in the upper class FCeV
+
+        Returns:
+           First date of the TImeseries 
+        """
         return self.input_series.start_time()
 
     def duration(self):
+        """ Function to get the total duration fo the timeseries from the upper class
+
+        Returns:
+            total lenght of the timeseries
+            
+        """
         return self.input_series.duration
     def preprocess_series(self, series, drop_before,drop_after, split_after):
         series = series.astype("float32")
-        # filler = transformers.MissingValuesFiller()
-        # series = filler.transform(series, method = "bfill", limit = 1000)
         series = series.drop_before(drop_before)
-        
         series = series.drop_after(drop_after)
         scaler = transformers.Scaler()
         train_series, val_series = series.split_before(split_after)
         train_series = scaler.fit_transform(train_series)
         val_series = scaler.transform(val_series)
-        series = scaler.transform(series)
-        return train_series, val_series, series, scaler
+        series_scaler = scaler.transform(series)
+        return train_series, val_series, series_scaler, scaler
     def prepare_synthetic_events(self,synthetic_events,  periods):
         if synthetic_events is None:
             raise ValueError("Syntheticevents not valid")
@@ -183,28 +209,18 @@ class DartsFCeV:
         train_base, val_base, series_base, scaler_base = self.preprocess_series(
             self.input_series, start_datetime, end_datetime, start_forecast_time
         )
-        if self.past_covariates is not None:
+        if self.covariates is not None:
             (
-                train_past_covariate,
-                _,
-                series_past_covariate,
-                scaler_past_covariate,
-            ) = self.preprocess_series(self.past_covariates,  start_datetime, end_datetime, start_forecast_time)
+                train_covariate,
+                val_covariate,
+                series_covariate,
+                scaler_covariate,
+            ) = self.preprocess_series(self.covariates,  start_datetime, end_datetime, start_forecast_time)
         else:
-            train_past_covariate = None
-            val_past_covariate = None
+            train_covariate = None
+            val_covariate = None
             series_past_covariate = None
-        if self.future_covariates is not None:
-           (
-                train_future_covariate,
-                _,
-                series_future_covariate,
-                scaler_future_covariate,
-            ) = self.preprocess_series(self.future_covariates, start_datetime, end_datetime, start_forecast_time)
-        else:
-            train_future_covariate = None
-            val_future_covariate = None
-            series_future_covariate = None
+            series_covariate = None
 
         (
                 train_events,
@@ -212,11 +228,13 @@ class DartsFCeV:
                 series_events,
                 scaler_events,
         ) = self.preprocess_series(series_ts, start_datetime, end_datetime, start_forecast_time)
-        model = self.create_dart_model()
+        # Todo Improve val 
         training_val = series_base[-(len(val_base) + self.n_lags):]
-        model = self.fit(model, train_base,training_val, train_past_covariate, train_future_covariate, train_events )
+
+
+        self.fit(train_base,training_val, train_covariate,  train_events )
         # Compute just one long forecast
-        df_forecast, df_uncertainty = self.test(model, val_base, series_past_covariate, series_future_covariate, series_events,scaler_events)
+        df_forecast, df_uncertainty = self.test(val_base, series_covariate, series_events,scaler_events)
         return df_forecast, df_uncertainty   
     def save_df(self, filename):
         path = Path(filename + ".csv")
@@ -226,16 +244,24 @@ class DartsFCeV:
             else:
                 self.npw_df.to_csv(path)
                 break
-    def fit(self, model,train_base,val_series, train_past_covariate, train_future_covariate, train_events ):
-        if isinstance(self.Darts_FCeV_config.DartsModelConfig, TCNDartsFCeVConfig):
-            if train_past_covariate is not None:
-                past_covariates_with_events = train_past_covariate.concatenate(train_events, axis = 1)
-                model.fit(train_base, val_series= val_series,val_past_covariates = past_covariates_with_events, past_covariates=past_covariates_with_events, verbose = self.FCeV_config.verbose)
-            else:
+    def fit(self, train_series,val_series, train_covariate, train_events ):
+        """
 
-                past_covariates_with_events = train_events
-                model.fit(train_base, val_series= val_series, past_covariates=past_covariates_with_events,verbose = self.FCeV_config.verbose )
-            return model 
+        Args:
+            train_series (): 
+            val_series (): 
+            train_covariate (): 
+            train_events (): 
+        """
+        if isinstance(self.Darts_FCeV_config.DartsModelConfig, TCNDartsFCeVConfig):
+            if train_covariate is not None:
+                covariates_with_events = train_covariate.concatenate(train_events, axis = 1)
+            else:
+                covariates_with_events = train_events
+            if self.Darts_FCeV_config.DartsModelConfig.covariate_type == "Future":
+                self.model = self.model.fit(train_series, val_series= val_series,val_future_covariates = covariates_with_events, future_covariate =covariates_with_events, epochs = self.Darts_FCeV_config.n_epochs,verbose = self.FCeV_config.verbose)
+            else: 
+                self.model = self.model.fit(train_series, val_series= val_series,val_past_covariates = covariates_with_events, past_covariates=covariates_with_events, epochs = self.Darts_FCeV_config.n_epochs,verbose = self.FCeV_config.verbose)
         else:
             raise ValueError("ModelNotImplemented") 
 
@@ -268,17 +294,32 @@ class DartsFCeV:
                 pl_trainer_kwargs=trainer_kwargs,
                 optimizer_cls = torch.optim.Adam,
                 lr_scheduler_cls = torch.optim.lr_scheduler.ReduceLROnPlateau,
-                optimizer_kwargs = {"lr": self.Darts_FCeV_config.learning_rate}
+                optimizer_kwargs = {"lr": self.Darts_FCeV_config.learning_rate},
+                random_state = self.Darts_FCeV_config.seed
             )
+        elif isinstance(self.Darts_FCeV_config.DartsModelConfig, TFTDartsFCeVConfig):
+
+            model = TFTModel(input_chunk_length = self.n_lags,
+                        output_chunk_length = self.n_forecasts,
+                        hidden_size=16, 
+                        lstm_layers=1, 
+                        num_attention_heads=4, 
+                        full_attention=False, 
+                        feed_forward='GatedResidualNetwork', 
+                        dropout=0.1, hidden_continuous_size=8, 
+                        categorical_embedding_sizes=None, 
+                        add_relative_index=False, 
+                        loss_fn=None, 
+                        likelihood=None, 
+                        norm_type='LayerNorm')
         else:
             raise ValueError("ModelNotImplemented")
         return model
 
-    def test(self, model, val_series, test_past_covariate, test_future_covariate, test_events, scaler_events):
-        periods = 5
+    def test(self, val_series, val_covariate,  val_events, scaler_events):
         forecast_result = {}
         forecast_uncer = {}
-        df_forecast, df_uncer = self.one_step_test(model, val_series, test_past_covariate, test_future_covariate, test_events)
+        df_forecast, df_uncer = self.one_step_test( val_series,val_covariate, val_events)
         forecast_result["BASE"] = df_forecast
         forecast_uncer["BASE"] = df_uncer
         if self.synthetic_events is None:
@@ -290,14 +331,14 @@ class DartsFCeV:
             for offset, df_offset in synth_dict.items():
                 df_synth = df_offset.set_index(val_series.time_index)
                 ts_syhtn = self.df_to_ts(df_synth)
-                if test_future_covariate is None:
+                if self.Darts_FCeV_config.DartsModelConfig.covariate_type == "Past":
                     ts_syhtn = ts_syhtn.shift(-self.n_forecasts)
                 ts_syhtn = scaler_events.transform(ts_syhtn)
-                before = test_events.drop_after(ts_syhtn.start_time())
-                after = test_events.drop_before(ts_syhtn.end_time())
+                before = val_events.drop_after(ts_syhtn.start_time())
+                after = val_events.drop_before(ts_syhtn.end_time())
                 ts_syhtn = before.append(ts_syhtn).append(after)
                 ts_syhtn = ts_syhtn.astype("float32")
-                df_forecast, df_uncertainty = self.one_step_test(model, val_series, test_past_covariate, test_future_covariate, ts_syhtn)
+                df_forecast, df_uncertainty = self.one_step_test( val_series, val_covariate, ts_syhtn)
                 offset_forecast[f"{offset}"] = df_forecast
                 offset_uncertainty[f"{offset}"] = df_uncertainty
             forecast_result[f"{synth_key}"] = offset_forecast
@@ -305,16 +346,16 @@ class DartsFCeV:
 
         return forecast_result, forecast_uncer
         
-    def one_step_test(self, model, base, past_covariate, future_covariate, events):
-        if future_covariate is None:
-            if past_covariate is None:
-                past_covariate = events
-            else: 
-                past_covariate = past_covariate.concatenate(events, axis = 1)
-
-        forecast = model.predict(self.n_forecasts, future_covariates = future_covariate, past_covariates = past_covariate, verbose = False)
+    def one_step_test(self,  base, covariate,events):
+        if covariate is None:
+            covariates_with_events = events
+        else: 
+            covariates_with_events = covariate.concatenate(events, axis = 1)
+        if self.Darts_FCeV_config.DartsModelConfig.covariate_type == "Future":
+            forecast = self.model.predict(self.n_forecasts, future_covariates = covariates_with_events, verbose = False)
+        else: 
+            forecast = self.model.predict(self.n_forecasts, past_covariates = covariates_with_events, verbose = False)
         results = base.slice_intersect(forecast)
-
         df_forecast = pd.concat([results.pd_dataframe(), forecast.pd_dataframe()], keys= ["current", "pred"], axis = 1)
 
         return df_forecast, df_forecast
@@ -627,30 +668,6 @@ class DartsFCeV:
         df_output = df_output.set_index("date").sort_values("date")
         return df_output
 
-    def _____one_step_test(self):
-        # https://towardsdatascience.com/efficiently-iterating-over-rows-in-a-pandas-dataframe-7dd5f9992c01
-        for index in self.npw_df.index:
-            if self.npw_df.loc[index]["is_fit"] == True:
-                future = self.npw_df.loc[index]["model"].make_future_dataframe(
-                    self.npw_df.loc[index]["df_test"], n_historic_predictions=0
-                )
-                forecast = self.npw_df.loc[index]["model"].predict(
-                    future, decompose=False, raw=True
-                )
-                y_predicted = forecast.filter(like="step").to_numpy()
-                y_actual = (
-                    pd.pivot(
-                        self.npw_df.loc[index]["df_test"],
-                        index="ds",
-                        columns="ID",
-                        values="y",
-                    )[-48:]
-                    .transpose()
-                    .to_numpy()
-                )
-                self.npw_df.at[index, "test_metrics"] = mean_squared_error(
-                    y_actual, y_predicted
-                )
 
     @staticmethod
     def save_config(config_path, config_npw, config_events):

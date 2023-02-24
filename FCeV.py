@@ -27,6 +27,7 @@ class METRICS(Enum):
     CoV = (0,)
     mape = (1,)
     marre = (2,)
+    RMSE = (3,)
 
 
 
@@ -73,8 +74,7 @@ class FCeV:
         FCeV_config,
         model_FCeV_config,
         df_input,
-        df_past_covariates,
-        df_future_covariates,
+        df_covariates,
         df_events,
         output_path,
         synthetic_events=pd.DataFrame(),
@@ -90,8 +90,7 @@ class FCeV:
                 FCeV_config,
                 model_FCeV_config,
                 df_input,
-                df_past_covariates,
-                df_future_covariates,
+                df_covariates,
                 df_events,
                 synthetic_events,
             )
@@ -181,18 +180,28 @@ class FCeV:
             if start_fold < self.start_date:
                 start_fold = self.start_date
             self.iterations.loc[index_iter] = [start_fold, end_fold]
-    def get_metrics_from_fc(self, df_forecast, metrics):
+
+    @staticmethod
+    def summarize_metrics(df_forecast, metrics):
+
+        mean_pred_values = df_forecast["current"].mean().mean()
+        return df_forecast.mean() / mean_pred_values
+    @staticmethod
+    def get_metrics_from_fc(df_forecast, metrics):
         if metrics is METRICS.CoV:
-            mean_pred_values = df_forecast["current"].mean().mean()
             return (
                 df_forecast["current"]
                 .sub(df_forecast["pred"])
                 .pow(2)
-                .mean(axis=0)
-                .pow(1 / 2)
-                .mean()
-                / mean_pred_values
+                .pow(1 / 2) / df_forecast["current"]
             ) * 100
+        elif metrics is METRICS.RMSE:
+            return (
+            df_forecast["current"]
+            .sub(df_forecast["pred"])
+            .pow(2)
+            .pow(1 / 2) 
+        ) * 100
         else:
             raise ValueError("Not Implemented Yet")
   
@@ -201,8 +210,34 @@ class FCeV:
         with open(f"{self.output_path}df_forecast_{file_name}", 'wb') as f:
             pickle.dump(df_forecast, f)
         if df_uncertainty is not None:
-            with open(f"{self.output_path}df_uncertainty{file_name}", 'wb') as f:
+            with open(f"{self.output_path}df_uncertainty{file_name}.pkl", 'wb') as f:
                 pickle.dump(df_uncertainty, f)
+
+    @staticmethod
+    def read_result(result_path):
+        all_dict = {}
+        for index_path in Path(result_path).rglob("*"):
+            with open(index_path, 'rb') as f:
+                x = pickle.load(f)
+                for key_outer, value_outer in x.items():
+                    # NO INNER DICT
+                    if isinstance(value_outer, pd.DataFrame):
+                        if key_outer in all_dict:
+                            all_dict[key_outer] = pd.concat([all_dict[key_outer], value_outer])
+                        else:
+                            all_dict[key_outer] = value_outer
+                    # Inner dict
+                    else:
+                        
+                        if key_outer not in all_dict:    
+                            all_dict[key_outer] = {}
+                        for key_inner, value_inner in value_outer.items():
+                           
+                            if key_inner in all_dict[key_outer]:
+                                all_dict[key_outer][key_inner] = pd.concat([all_dict[key_outer][key_inner], value_inner])
+                            else:
+                                all_dict[key_outer][key_inner] = value_inner
+        return all_dict
     def get_binary_perform(self, metrics, min_limit, max_limit, config_events=None):
         df = self.get_binary_results(metrics, min_limit, max_limit, config_events)
         # Get the confusion matrix

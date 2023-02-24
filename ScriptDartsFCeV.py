@@ -22,13 +22,11 @@ import click
 import torch
 
 
-from FCeV import FCeV, FCeVConfig
+from FCeV import FCeV, FCeVConfig, METRICS
 
 # click_example.py
 
 from DartsFCeV import DartsFCeVConfig, TCNDartsFCeVConfig
-
-from FCeV import FCeV, FCeVConfig
 
 
 @click.argument("seed", nargs = 1, type = int, default = 100)
@@ -160,6 +158,7 @@ def configure(
         "use_gpu": False,
         "event_type": "Non-Binary",
         "patience": patience,
+        "seed": seed
     }
     darts_FCeV_config = DartsFCeVConfig(**darts_FCev_config)
     FCev_config = {
