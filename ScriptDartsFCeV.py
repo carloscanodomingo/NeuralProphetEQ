@@ -192,7 +192,7 @@ def configure(
         current_fcev.create_folds(k=total_index, offset_lenght=pd.Timedelta(days=offset_start, hours = 12))
         df_fore, df_uncer = current_fcev.process_fold(current_index)
 
-        cov_result = current_fcev.get_metrics_from_fc(df_fore["BASE"], METRICS.RMSE)
+        cov_result = current_fcev.get_metrics_from_fc(df_fore["BASE"], METRICS.RMSE).mean().mean()
         sys.stdout = sys.__stdout__
         sys.stderr = sys.__stderr__
         print(str(cov_result) + "\n")
