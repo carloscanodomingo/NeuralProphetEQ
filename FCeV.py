@@ -145,10 +145,10 @@ class FCeV:
             raise ValueError(f"Index folds exceed number of folds: {len(self.folds)}")
         start_fold, end_fold = self.folds.iloc[index_fold]
         # df_forecast, df_uncertainty = 
-        df_forecast, df_uncertainty = self.FCeV_model.process_forecast(
+        df_forecast = self.FCeV_model.process_forecast(
             start_fold, end_fold
         )
-        return df_forecast, df_uncertainty
+        return df_forecast
 
     def process_iteration(self, index_fold):
 
@@ -158,10 +158,10 @@ class FCeV:
             raise ValueError(f"Index index_iteration exceed number of iterations: {len(self.iterations)}")
         start_fold, end_fold = self.iterations.iloc[index_fold]
         # df_forecast, df_uncertainty = 
-        df_forecast, df_uncertainty = self.FCeV_model.process_forecast(
+        df_forecast  = self.FCeV_model.process_forecast(
             start_fold, end_fold
         )
-        return df_forecast, df_uncertainty
+        return df_forecast
 
     def create_iteration(self, offset_lenght, n_iteration):
         self.iterations = pd.DataFrame(columns=["start_date", "end_date"])
@@ -205,14 +205,13 @@ class FCeV:
         else:
             raise ValueError("Not Implemented Yet")
   
-    def save_results(self, df_forecast, df_uncertainty = None):
+    def save_results(self, df_forecast):
         file_name = df_forecast["BASE"].index[0].strftime("%Y_%m_%d_%H_%M_%S")
         with open(f"{self.output_path}df_forecast_{file_name}", 'wb') as f:
             pickle.dump(df_forecast, f)
-        if df_uncertainty is not None:
-            with open(f"{self.output_path}df_uncertainty{file_name}.pkl", 'wb') as f:
-                pickle.dump(df_uncertainty, f)
-
+    @staticmethod
+    def plot_results(df_forecast):
+        ...
     @staticmethod
     def read_result(result_path):
         all_dict = {}

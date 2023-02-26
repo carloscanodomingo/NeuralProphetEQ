@@ -5,17 +5,12 @@ from datetime import datetime, timedelta
 from aux_function_SR import get_eq_filtered, SR_SENSORS
 from NPw_aux import drop_scale, prepare_eq
 import numpy as np
-from sklearn.metrics import mean_squared_error, mean_absolute_error, confusion_matrix
-from unique_names_generator import get_random_name
-from unique_names_generator.data import ADJECTIVES, NAMES, ANIMALS, COLORS
-from dateutil.relativedelta import *
-import os
+from sklearn.metrics import  confusion_matrix
 import dateutil.parser
 from pathlib import Path
 from enum import Enum
 from typing_extensions import Literal
 from pytorch_lightning.callbacks import EarlyStopping
-import warnings
 from IPython.display import display
 from IPython.core.display import HTML
 import json
@@ -23,7 +18,7 @@ import torch
 import darts
 from darts.dataprocessing import transformers
 
-from darts.models import TCNModel, TFTModel
+from darts.models import TCNModel, TFTModel, RNNModel, NBEATSModel, NHiTSModel, TransformerModel, NLinearModel
 
 # from FCeV import FCeVConfig
 covariate_types = {"Future", "Past"}
@@ -56,7 +51,46 @@ class DartsFCeVConfig:
     n_epochs: int
     patience: int
     seed: int
+    probabilistic: bool
 
+@dataclass
+class TransformerDartsFCeVConfig(metaclass = DartModelMetaClass):
+    covariate_type = "Past"
+    d_model: int
+    nhead: int = 4
+    num_encoder_layers: int = 3
+    num_decoder_layers: int = 3 #Hidden dim
+    dim_feedforward: int = 512
+    activation: Literal["relu", "GLU", "Bilinear", "ReGLU", "GEGLU"] = "relu"
+    norm_type: Literal[None, "LayerNorm"  "RMSNorm ", "LayerNormNoBias"] =None
+@dataclass
+class NLinearDartsFCeVConfig(metaclass = DartModelMetaClass):
+    covariate_type = "Future"
+    const_init: bool#Hidden dim
+@dataclass
+class RNNDartsFCeVConfig(metaclass = DartModelMetaClass):
+    covariate_type = "Future"
+    hidden_dim: int #Hidden dim
+    n_rnn_layers: float #Num layers``
+    model: Literal['RNN', 'LSTM', 'GRU'] = "GRU"
+
+@dataclass
+class NBEATSDartsFCeVConfig(metaclass = DartModelMetaClass):
+    covariate_type = "Past"
+    num_stacks :int 
+    num_layers: int 
+    num_blocks:int
+    layer_widths: int
+    expansion_coefficient_dim: int
+@dataclass
+class NHITSDartsFCeVConfig(metaclass = DartModelMetaClass):
+    covariate_type = "Past"
+    num_stacks :int 
+    num_layers: int 
+    num_blocks:int
+    layer_widths: int
+    expansion_coefficient_dim: int
+    max_pool_1d: bool
 @dataclass
 class TCNDartsFCeVConfig(metaclass = DartModelMetaClass):
     covariate_type = "Past"
@@ -72,9 +106,9 @@ class TFTDartsFCeVConfig(metaclass = DartModelMetaClass):
     lstm_layers: int
     hidden_size: int
     num_attention_heads: int
+    full_attention: bool
     add_relative_index: bool
-    add_encoders: int
-    likelihood: Literal["QuantileRegression"]
+    hidden_continuous_size: int
 
 
 class DartsFCeV:
@@ -89,7 +123,7 @@ class DartsFCeV:
     ):
         """
 
-        Args:
+        Argsn
             FCeV_config ():
             Darts_FCev_config ():
             df_input ():
@@ -232,10 +266,10 @@ class DartsFCeV:
         training_val = series_base[-(len(val_base) + self.n_lags):]
 
 
-        self.fit(train_base,training_val, train_covariate,  train_events )
+        self.fit(train_base,training_val, series_covariate,  series_events )
         # Compute just one long forecast
-        df_forecast, df_uncertainty = self.test(val_base, series_covariate, series_events,scaler_events)
-        return df_forecast, df_uncertainty   
+        df_forecast = self.test(val_base, series_covariate, series_events,scaler_events)
+        return df_forecast   
     def save_df(self, filename):
         path = Path(filename + ".csv")
         for index in range(100):
@@ -253,17 +287,15 @@ class DartsFCeV:
             train_covariate (): 
             train_events (): 
         """
-        if isinstance(self.Darts_FCeV_config.DartsModelConfig, TCNDartsFCeVConfig):
-            if train_covariate is not None:
-                covariates_with_events = train_covariate.concatenate(train_events, axis = 1)
-            else:
-                covariates_with_events = train_events
-            if self.Darts_FCeV_config.DartsModelConfig.covariate_type == "Future":
-                self.model = self.model.fit(train_series, val_series= val_series,val_future_covariates = covariates_with_events, future_covariate =covariates_with_events, epochs = self.Darts_FCeV_config.n_epochs,verbose = self.FCeV_config.verbose)
-            else: 
-                self.model = self.model.fit(train_series, val_series= val_series,val_past_covariates = covariates_with_events, past_covariates=covariates_with_events, epochs = self.Darts_FCeV_config.n_epochs,verbose = self.FCeV_config.verbose)
+        if train_covariate is not None:
+            covariates_with_events = train_covariate.concatenate(train_events, axis = 1)
         else:
-            raise ValueError("ModelNotImplemented") 
+            covariates_with_events = train_events
+
+        if self.Darts_FCeV_config.DartsModelConfig.covariate_type == "Future":
+            self.model = self.model.fit(train_series, val_series= val_series,val_future_covariates = covariates_with_events, future_covariates=covariates_with_events, epochs = self.Darts_FCeV_config.n_epochs,verbose = self.FCeV_config.verbose)
+        else: 
+            self.model = self.model.fit(train_series, val_series= val_series,val_past_covariates = covariates_with_events, past_covariates=covariates_with_events, epochs = self.Darts_FCeV_config.n_epochs,verbose = self.FCeV_config.verbose)
 
     def create_dart_model(self):
         early_stopper = EarlyStopping("val_loss", min_delta=0.0001, patience=self.Darts_FCeV_config.patience, mode = "min")
@@ -278,40 +310,152 @@ class DartsFCeV:
                 "devices" : 1,
                  "callbacks": [early_stopper],
             }
+        if self.Darts_FCeV_config.probabilistic:
+            likelihood = darts.utils.likelihood_models.GaussianLikelihood()
+        else:
+            likelihood = None
         # trainer_config = {"accelerator":"gpu"}
         if isinstance(self.Darts_FCeV_config.DartsModelConfig, TCNDartsFCeVConfig):
-            print(f"input chunck: {self.n_lags}")
             model = TCNModel(
                 input_chunk_length=self.n_lags,
                 output_chunk_length=self.n_forecasts,
-                dropout=self.Darts_FCeV_config.dropout,
                 n_epochs=self.Darts_FCeV_config.n_epochs,
+                dropout=self.Darts_FCeV_config.dropout,
                 dilation_base=self.Darts_FCeV_config.DartsModelConfig.dilation_base,
                 weight_norm=self.Darts_FCeV_config.DartsModelConfig.weight_norm,
                 kernel_size=self.Darts_FCeV_config.DartsModelConfig.kernel_size,
                 num_filters=self.Darts_FCeV_config.DartsModelConfig.num_filter,
                 force_reset=True,
+                likelihood=likelihood,
                 pl_trainer_kwargs=trainer_kwargs,
                 optimizer_cls = torch.optim.Adam,
                 lr_scheduler_cls = torch.optim.lr_scheduler.ReduceLROnPlateau,
                 optimizer_kwargs = {"lr": self.Darts_FCeV_config.learning_rate},
-                random_state = self.Darts_FCeV_config.seed
+                random_state = self.Darts_FCeV_config.seed,
+                batch_size = self.Darts_FCeV_config.batch_size
             )
         elif isinstance(self.Darts_FCeV_config.DartsModelConfig, TFTDartsFCeVConfig):
-
+   
             model = TFTModel(input_chunk_length = self.n_lags,
-                        output_chunk_length = self.n_forecasts,
-                        hidden_size=16, 
-                        lstm_layers=1, 
-                        num_attention_heads=4, 
-                        full_attention=False, 
-                        feed_forward='GatedResidualNetwork', 
-                        dropout=0.1, hidden_continuous_size=8, 
-                        categorical_embedding_sizes=None, 
-                        add_relative_index=False, 
-                        loss_fn=None, 
-                        likelihood=None, 
-                        norm_type='LayerNorm')
+                output_chunk_length = self.n_forecasts,
+                n_epochs=self.Darts_FCeV_config.n_epochs,
+                hidden_size=self.Darts_FCeV_config.DartsModelConfig.hidden_size, 
+                lstm_layers=self.Darts_FCeV_config.DartsModelConfig.lstm_layers, 
+                num_attention_heads=self.Darts_FCeV_config.DartsModelConfig.num_attention_heads,  
+                full_attention=self.Darts_FCeV_config.DartsModelConfig.full_attention, 
+                dropout=self.Darts_FCeV_config.dropout,
+                add_relative_index=False, 
+                force_reset=True,
+                likelihood=likelihood,
+                loss_fn=torch.nn.MSELoss(),
+                pl_trainer_kwargs=trainer_kwargs,
+                optimizer_cls = torch.optim.Adam,
+                lr_scheduler_cls = torch.optim.lr_scheduler.ReduceLROnPlateau,
+                optimizer_kwargs = {"lr": self.Darts_FCeV_config.learning_rate},
+                random_state = self.Darts_FCeV_config.seed,
+                batch_size = self.Darts_FCeV_config.batch_size
+                             )
+        elif isinstance(self.Darts_FCeV_config.DartsModelConfig, RNNDartsFCeVConfig):
+   
+            model = RNNModel(input_chunk_length = self.n_lags,
+                training_length= self.n_forecasts,
+                n_epochs=self.Darts_FCeV_config.n_epochs,
+                hidden_dim=self.Darts_FCeV_config.DartsModelConfig.hidden_dim, 
+                model=self.Darts_FCeV_config.DartsModelConfig.model, 
+                n_rnn_layers=self.Darts_FCeV_config.DartsModelConfig.n_rnn_layers,  
+                dropout=self.Darts_FCeV_config.dropout,
+                force_reset=True,
+                likelihood=likelihood,
+                loss_fn=torch.nn.MSELoss(),
+                pl_trainer_kwargs=trainer_kwargs,
+                optimizer_cls = torch.optim.Adam,
+                lr_scheduler_cls = torch.optim.lr_scheduler.ReduceLROnPlateau,
+                optimizer_kwargs = {"lr": self.Darts_FCeV_config.learning_rate},
+                random_state = self.Darts_FCeV_config.seed,
+                batch_size = self.Darts_FCeV_config.batch_size
+                             )
+        elif isinstance(self.Darts_FCeV_config.DartsModelConfig, NBEATSDartsFCeVConfig):
+   
+            model = NBEATSModel(input_chunk_length = self.n_lags,
+                output_chunk_length= self.n_forecasts,
+                n_epochs=self.Darts_FCeV_config.n_epochs,
+                generic_architecture=True,
+                num_stacks=self.Darts_FCeV_config.DartsModelConfig.num_stacks,  
+                num_layers=self.Darts_FCeV_config.DartsModelConfig.num_layers,  
+                num_blocks=self.Darts_FCeV_config.DartsModelConfig.num_blocks,  
+                layer_widths=self.Darts_FCeV_config.DartsModelConfig.layer_widths,  
+                expansion_coefficient_dim=self.Darts_FCeV_config.DartsModelConfig.expansion_coefficient_dim,  
+                dropout=self.Darts_FCeV_config.dropout,
+                force_reset=True,
+                likelihood=likelihood,
+                loss_fn=torch.nn.MSELoss(),
+                pl_trainer_kwargs=trainer_kwargs,
+                optimizer_cls = torch.optim.Adam,
+                lr_scheduler_cls = torch.optim.lr_scheduler.ReduceLROnPlateau,
+                optimizer_kwargs = {"lr": self.Darts_FCeV_config.learning_rate},
+                random_state = self.Darts_FCeV_config.seed,
+                batch_size = self.Darts_FCeV_config.batch_size
+                             )
+        elif isinstance(self.Darts_FCeV_config.DartsModelConfig, NHITSDartsFCeVConfig):
+   
+            model = NHiTSModel(input_chunk_length = self.n_lags,
+                output_chunk_length= self.n_forecasts,
+                n_epochs=self.Darts_FCeV_config.n_epochs,
+                num_stacks=self.Darts_FCeV_config.DartsModelConfig.num_stacks,  
+                num_layers=self.Darts_FCeV_config.DartsModelConfig.num_layers,  
+                num_blocks=self.Darts_FCeV_config.DartsModelConfig.num_blocks,  
+                layer_widths=self.Darts_FCeV_config.DartsModelConfig.layer_widths,  
+                MaxPool1d= self.Darts_FCeV_config.DartsModelConfig.max_pool_1d,  
+                dropout=self.Darts_FCeV_config.dropout,
+                force_reset=True,
+                likelihood=likelihood,
+                loss_fn=torch.nn.MSELoss(),
+                pl_trainer_kwargs=trainer_kwargs,
+                optimizer_cls = torch.optim.Adam,
+                lr_scheduler_cls = torch.optim.lr_scheduler.ReduceLROnPlateau,
+                optimizer_kwargs = {"lr": self.Darts_FCeV_config.learning_rate},
+                random_state = self.Darts_FCeV_config.seed,
+                batch_size = self.Darts_FCeV_config.batch_size
+                             )
+        elif isinstance(self.Darts_FCeV_config.DartsModelConfig, TransformerDartsFCeVConfig):
+                model = TransformerModel(
+                input_chunk_length = self.n_lags,
+                output_chunk_length= self.n_forecasts,
+                dropout=self.Darts_FCeV_config.dropout,
+                force_reset=True,
+                likelihood=likelihood,
+                loss_fn=torch.nn.MSELoss(),
+                pl_trainer_kwargs=trainer_kwargs,
+                optimizer_cls = torch.optim.Adam,
+                lr_scheduler_cls = torch.optim.lr_scheduler.ReduceLROnPlateau,
+                optimizer_kwargs = {"lr": self.Darts_FCeV_config.learning_rate},
+                random_state = self.Darts_FCeV_config.seed,
+                batch_size = self.Darts_FCeV_config.batch_size,
+                n_epochs=self.Darts_FCeV_config.n_epochs,
+                d_model=self.Darts_FCeV_config.DartsModelConfig.d_model,  
+                nhead=self.Darts_FCeV_config.DartsModelConfig.nhead,  
+                num_encoder_layers=self.Darts_FCeV_config.DartsModelConfig.num_encoder_layers,       
+                num_decoder_layers=self.Darts_FCeV_config.DartsModelConfig.num_decoder_layers,       
+                dim_feedforward=self.Darts_FCeV_config.DartsModelConfig.dim_feedforward, 
+                activation=self.Darts_FCeV_config.DartsModelConfig.activation, 
+                norm_type= self.Darts_FCeV_config.DartsModelConfig.norm_type, 
+            )
+        elif isinstance(self.Darts_FCeV_config.DartsModelConfig, NLinearDartsFCeVConfig):
+                model = NLinearModel(
+                input_chunk_length = self.n_lags,
+                output_chunk_length= self.n_forecasts,
+                force_reset=True,
+                likelihood=likelihood,
+                loss_fn=torch.nn.MSELoss(),
+                pl_trainer_kwargs=trainer_kwargs,
+                optimizer_cls = torch.optim.Adam,
+                lr_scheduler_cls = torch.optim.lr_scheduler.ReduceLROnPlateau,
+                optimizer_kwargs = {"lr": self.Darts_FCeV_config.learning_rate},
+                random_state = self.Darts_FCeV_config.seed,
+                batch_size = self.Darts_FCeV_config.batch_size,
+                n_epochs=self.Darts_FCeV_config.n_epochs,
+                const_init= self.Darts_FCeV_config.DartsModelConfig.const_init, 
+            )
         else:
             raise ValueError("ModelNotImplemented")
         return model
@@ -319,9 +463,9 @@ class DartsFCeV:
     def test(self, val_series, val_covariate,  val_events, scaler_events):
         forecast_result = {}
         forecast_uncer = {}
-        df_forecast, df_uncer = self.one_step_test( val_series,val_covariate, val_events)
+        df_forecast = self.one_step_test( val_series,val_covariate, val_events)
         forecast_result["BASE"] = df_forecast
-        forecast_uncer["BASE"] = df_uncer
+        # forecast_uncer["BASE"] = df_uncer
         if self.synthetic_events is None:
             return forecast_result, forecast_uncer
  
@@ -333,32 +477,41 @@ class DartsFCeV:
                 ts_syhtn = self.df_to_ts(df_synth)
                 if self.Darts_FCeV_config.DartsModelConfig.covariate_type == "Past":
                     ts_syhtn = ts_syhtn.shift(-self.n_forecasts)
-                ts_syhtn = scaler_events.transform(ts_syhtn)
-                before = val_events.drop_after(ts_syhtn.start_time())
-                after = val_events.drop_before(ts_syhtn.end_time())
-                ts_syhtn = before.append(ts_syhtn).append(after)
+                    ts_syhtn = scaler_events.transform(ts_syhtn)
+                    before = val_events.drop_after(ts_syhtn.start_time())
+                    after = val_events.drop_before(ts_syhtn.end_time())
+                    ts_syhtn = before.append(ts_syhtn).append(after)
+                else:
+                    ts_syhtn = scaler_events.transform(ts_syhtn)
+                    ts_syhtn = val_events.drop_after(ts_syhtn.start_time()).append(ts_syhtn)
                 ts_syhtn = ts_syhtn.astype("float32")
-                df_forecast, df_uncertainty = self.one_step_test( val_series, val_covariate, ts_syhtn)
+                df_forecast = self.one_step_test( val_series, val_covariate, ts_syhtn)
                 offset_forecast[f"{offset}"] = df_forecast
-                offset_uncertainty[f"{offset}"] = df_uncertainty
+                # offset_uncertainty[f"{offset}"] = df_uncertainty
             forecast_result[f"{synth_key}"] = offset_forecast
-            forecast_uncer[f"{synth_key}"] = offset_uncertainty
+            # forecast_uncer[f"{synth_key}"] = offset_uncertainty
 
-        return forecast_result, forecast_uncer
+        return forecast_result
         
     def one_step_test(self,  base, covariate,events):
+        if self.Darts_FCeV_config.probabilistic:
+            n_samples = 1000
+        else:
+            n_samples = 1
         if covariate is None:
             covariates_with_events = events
         else: 
             covariates_with_events = covariate.concatenate(events, axis = 1)
         if self.Darts_FCeV_config.DartsModelConfig.covariate_type == "Future":
-            forecast = self.model.predict(self.n_forecasts, future_covariates = covariates_with_events, verbose = False)
+            forecast = self.model.predict(self.n_forecasts, future_covariates = covariates_with_events, verbose = False,num_samples=n_samples)
         else: 
-            forecast = self.model.predict(self.n_forecasts, past_covariates = covariates_with_events, verbose = False)
+            forecast = self.model.predict(self.n_forecasts, past_covariates = covariates_with_events, verbose = False,num_samples=n_samples)
         results = base.slice_intersect(forecast)
-        df_forecast = pd.concat([results.pd_dataframe(), forecast.pd_dataframe()], keys= ["current", "pred"], axis = 1)
-
-        return df_forecast, df_forecast
+        if self.Darts_FCeV_config.probabilistic:
+            df_forecast = pd.concat([results.pd_dataframe(), forecast.mean().pd_dataframe(), forecast.std().pd_dataframe()], keys= ["current", "pred", "uncer"], axis = 1)
+        else:
+            df_forecast = pd.concat([results.pd_dataframe(), forecast.mean().pd_dataframe()], keys= ["current", "pred"], axis = 1)
+        return df_forecast
 
     # Predict for differents hours offset and differents event offset
     def predict_with_offset_hours(self, start_day, hours_offsets, event_offsets):
