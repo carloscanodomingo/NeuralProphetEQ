@@ -166,13 +166,13 @@ def configure(
     config_events = ConfigEQ(**ConfigEQ_d)
 
     freq = timedelta(minutes=30)
-    #df_GNSSTEC, df_covariate, df_eq = prepare_ion_data(data_path, "GRK", freq)
-    #synthetic_events = pd.read_pickle(data_path+"synthetic_raw.pkl")
+    df_GNSSTEC, df_covariate, df_eq = prepare_ion_data(data_path, "GRK", freq)
+    synthetic_events = pd.read_pickle(data_path+"synthetic_raw.pkl")
     
     
-    df_GNSSTEC = pd.read_pickle("data_test/df_GNSSTEC.pkl")
-    df_covariate = pd.read_pickle("data_test/df_covariate.pkl")
-    df_eq = pd.read_pickle("data_test/df_eq.pkl")
+    #df_GNSSTEC = pd.read_pickle("data_test/df_GNSSTEC.pkl")
+    #df_covariate = pd.read_pickle("data_test/df_covariate.pkl")
+    #df_eq = pd.read_pickle("data_test/df_eq.pkl")
     synthetic_events = pd.read_pickle("data_test/synthetic_raw.pkl")
     
     df_regressor = df_GNSSTEC.reset_index()
