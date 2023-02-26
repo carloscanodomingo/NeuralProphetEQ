@@ -22,7 +22,7 @@ from NPw_aux import prepare_EQ, ConfigEQ, prepare_ion_data
 import click
 import torch
 
-MAX_TIMEOUT = 3600 / 4  # MAX TIME 15min
+MAX_TIMEOUT = 3600/ 3  # MAX TIME 20min
 MAX_VALUE = 200
 from FCeV import FCeV, FCeVConfig, METRICS
 
@@ -166,10 +166,15 @@ def configure(
     config_events = ConfigEQ(**ConfigEQ_d)
 
     freq = timedelta(minutes=30)
-    df_GNSSTEC, df_covariate, df_eq = prepare_ion_data(data_path, "GRK", freq)
-    #df_GNSSTEC = pd.read_pickle("df_GNSSTEC.pkl")
-    #df_covariate = pd.read_pickle("df_covariate.pkl")
-    #df_eq = pd.read_pickle("df_eq.pkl")
+    #df_GNSSTEC, df_covariate, df_eq = prepare_ion_data(data_path, "GRK", freq)
+    #synthetic_events = pd.read_pickle(data_path+"synthetic_raw.pkl")
+    
+    
+    df_GNSSTEC = pd.read_pickle("data_test/df_GNSSTEC.pkl")
+    df_covariate = pd.read_pickle("data_test/df_covariate.pkl")
+    df_eq = pd.read_pickle("data_test/df_eq.pkl")
+    synthetic_events = pd.read_pickle("data_test/synthetic_raw.pkl")
+    
     df_regressor = df_GNSSTEC.reset_index()
     df_other = df_covariate
     df_events = prepare_EQ(df_eq, config_events)
@@ -255,7 +260,7 @@ def configure(
 
     FCev_config = FCeVConfig(**FCev_config)
 
-    synthetic_events = pd.read_pickle(data_path+"synthetic_raw.pkl")
+    
 
     # Read SR and EQ data
     if verbose == 0:
@@ -277,7 +282,9 @@ def configure(
         )
         try:
             df_fore = process_fold_with_timeout(current_fcev, current_index)
-        except FunctionTimedOut:
+        except :
+            sys.stdout = sys.__stdout__
+            sys.stderr = sys.__stderr__
             print(str(MAX_VALUE) + "\n")
             sys.exit(0)
         cov_result = (

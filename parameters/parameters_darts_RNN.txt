@@ -1,0 +1,65 @@
+## Template for parameter description file for Iterated Race.
+##
+## The format is one parameter per line. Each line contains:
+##
+## 1: Name of the parameter. An unquoted alphanumeric string,
+##    example: ants
+
+## 2: Switch to pass the parameter. A quoted (possibly empty) string, 
+##    if the value and the switch must be separated, add a space at
+##    the end of the string. Example : "--version1 --ants "
+
+## 3: Type. An unquoted single letter, among 
+##     i: Integer, c: categorical, o: ordinal, r: real.
+
+## 4: For c and o: All possible values, that is, a variable number of
+##    quoted or unquoted strings separated by commas within
+##    parenthesis. Empty strings and strings containing commas or
+##    spaces must be quoted.
+##    For i,r: a pair of unquoted numbers representing minimum and
+##    maximum values. 
+
+## 5: A conditional parameter can be defined according to the values of
+##    one or several other parameters.  This is done by adding a
+##    character '|' followed by an R expression involving the names of
+##    other parameters. This expression must return TRUE if the 
+##    condition is satisfied, FALSE otherwise.
+
+# 1:                     2:                                 3:      4:                             			5:
+historic_lenght          "--historic_lenght="               i      (2, 15) 
+training_lenght_days    "--training_lenght_days="           i      (30, 90) 
+learning_rate           "--learning_rate="                  i      (1, 4) 
+dropout                 "--dropout="                        o      (0, 0.1, 0.2, 0.3, 0.4, 0.5) 
+batch_size              "--batch_size="                     o      (400,600, 800)
+epochs                	"--epochs="                         c      (300)
+n_layers             	"--n_layers="                       i      (1, 10)
+internal_size           "--internal_size="                  o      (4,8, 12,16,24,32) 
+use_gpu                 "--use_gpu="                        c      (0) 
+probabilistic           "--probabilistic="                  c      (0, 1) 
+patience                "--patience="                       o      (5,10,15,20, 25, 30)
+offset_start            "offset_start="                     c      (730)
+verbose 		"--verbose=" 		            c      (0)
+data_path 		"--data_path="		            c      (/mnt/hum01-home01/ambs/y06068cc/data/)
+out_path	        "--out_path="			    c      (/mnt/hum01-home01/ambs/y06068cc/output/results/)
+model                   "--model="               	    c      (RNN) 
+
+TCN_dilation_base       "--TCN_dilation_base="              i      (1, 5)    						| model == "TCN"
+TCN_weight_norm         "--TCN_weight_norm="                c      (1)       						| model == "TCN"
+
+RNN_model               "--RNN_model="                      c     (RNN, LSTM, GRU)         				| model == "RNN"
+
+NBEATS_NHITS_num_blocks "--NBEATS_NHITS_num_blocks="        i      (1, 20)					        | model == "NBEATS" || model == "NHITS"
+NBEATS_NHITS_num_stacks "--NBEATS_NHITS_num_stacks="        i      (1, 20) 					        | model == "NBEATS" || model == "NHITS"     
+NBEATS_NHITS_exp_coef   "--NBEATS_NHITS_exp_coef="          c      (1, 20)					        | model == "NBEATS" || model == "NHITS"
+
+Transf_n_head_divisor   "--Transf_n_head_divisor="          i      (1, 5) 					        | model == "Transformer"        
+Transf_dim_feedforward  "--Transf_dim_feedforward="         o      (16, 32, 64, 128, 256)			        | model == "Transformer"
+
+NHITS_max_pool_1d       "--NHITS_max_pool_1d="              c      (0,1) 					        | model == "NHITS"    
+
+NLinear_const_init      "--NLinear_const_init="             c      (0,1)  					        | model == "NLinear"       
+
+TFT_num_attention_heads "--TFT_num_attention_heads="        i      (1, 10)  					        | model == "TFT"       
+TFT_full_attention      "--TFT_full_attention="             c      (0,1)					        | model == "TFT"
+TFT_add_relative_index  "--TFT_add_relative_index="         c      (0,1)   					        | model == "TFT"     
+TFT_hidden_cont_size    "--TFT_hidden_cont_size="           i      (1,10)					        | model == "TFT"

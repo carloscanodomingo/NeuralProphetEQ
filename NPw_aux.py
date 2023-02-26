@@ -42,7 +42,7 @@ def process_GNSSTEC_files(path_to_raw_files):
 
 
 def get_station_names(path_to_stations, site):
-    df_stations = pd.read_csv(path_to_stations + "/" + "station_list.csv")
+    df_stations = pd.read_csv(path_to_stations + "station_list.csv")
     station_names = list((df_stations[df_stations["site"] == site])["station_id"])
     # Read all the station available:
     df_stations = df_stations.set_index("station_id")
