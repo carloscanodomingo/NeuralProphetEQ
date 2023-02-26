@@ -46,6 +46,8 @@ class DartsFCeVConfig:
     learning_rate: float
     use_gpu: bool
     event_type: Literal["None", "Binary", "Non-Binary"]
+    n_layers: int
+    internal_size: int
     dropout: float
     batch_size: int
     n_epochs: int
@@ -54,57 +56,56 @@ class DartsFCeVConfig:
     probabilistic: bool
 
 @dataclass
+class TCNDartsFCeVConfig(metaclass = DartModelMetaClass):
+    covariate_type = "Past"
+    dilation_base: float
+    weight_norm: bool
+
+@dataclass
+class NHITSDartsFCeVConfig(metaclass = DartModelMetaClass):
+    covariate_type = "Past"
+    num_stacks :int 
+    # num_layers: int 
+    num_blocks:int
+    # layer_widths: int
+    expansion_coefficient_dim: int
+    max_pool_1d: bool
+
+@dataclass
 class TransformerDartsFCeVConfig(metaclass = DartModelMetaClass):
     covariate_type = "Past"
-    d_model: int
-    nhead: int = 4
-    num_encoder_layers: int = 3
-    num_decoder_layers: int = 3 #Hidden dim
-    dim_feedforward: int = 512
+    # d_model: int
+    n_head_divisor: int
+    dim_feedforward: int
     activation: Literal["relu", "GLU", "Bilinear", "ReGLU", "GEGLU"] = "relu"
     norm_type: Literal[None, "LayerNorm"  "RMSNorm ", "LayerNormNoBias"] =None
+
+
+@dataclass
+class RNNDartsFCeVConfig(metaclass = DartModelMetaClass):
+    covariate_type = "Future"
+    RNNmodel: Literal['RNN', 'LSTM', 'GRU'] = "GRU"
+
 @dataclass
 class NLinearDartsFCeVConfig(metaclass = DartModelMetaClass):
     covariate_type = "Future"
     const_init: bool#Hidden dim
-@dataclass
-class RNNDartsFCeVConfig(metaclass = DartModelMetaClass):
-    covariate_type = "Future"
-    hidden_dim: int #Hidden dim
-    n_rnn_layers: float #Num layers``
-    model: Literal['RNN', 'LSTM', 'GRU'] = "GRU"
 
 @dataclass
 class NBEATSDartsFCeVConfig(metaclass = DartModelMetaClass):
     covariate_type = "Past"
     num_stacks :int 
-    num_layers: int 
+    # num_layers: int 
     num_blocks:int
-    layer_widths: int
+    # layer_widths: int
     expansion_coefficient_dim: int
-@dataclass
-class NHITSDartsFCeVConfig(metaclass = DartModelMetaClass):
-    covariate_type = "Past"
-    num_stacks :int 
-    num_layers: int 
-    num_blocks:int
-    layer_widths: int
-    expansion_coefficient_dim: int
-    max_pool_1d: bool
-@dataclass
-class TCNDartsFCeVConfig(metaclass = DartModelMetaClass):
-    covariate_type = "Past"
-    dilation_base: float
-    weight_norm: bool
-    kernel_size: int
-    num_filter: int
 
 
 @dataclass
 class TFTDartsFCeVConfig(metaclass = DartModelMetaClass):
     covariate_type = "Future"
-    lstm_layers: int
-    hidden_size: int
+    # lstm_layers: int
+    # hidden_size: int
     num_attention_heads: int
     full_attention: bool
     add_relative_index: bool
@@ -323,8 +324,8 @@ class DartsFCeV:
                 dropout=self.Darts_FCeV_config.dropout,
                 dilation_base=self.Darts_FCeV_config.DartsModelConfig.dilation_base,
                 weight_norm=self.Darts_FCeV_config.DartsModelConfig.weight_norm,
-                kernel_size=self.Darts_FCeV_config.DartsModelConfig.kernel_size,
-                num_filters=self.Darts_FCeV_config.DartsModelConfig.num_filter,
+                kernel_size=self.Darts_FCeV_config.internal_size,
+                num_filters=self.Darts_FCeV_config.n_layers,
                 force_reset=True,
                 likelihood=likelihood,
                 pl_trainer_kwargs=trainer_kwargs,
@@ -339,8 +340,8 @@ class DartsFCeV:
             model = TFTModel(input_chunk_length = self.n_lags,
                 output_chunk_length = self.n_forecasts,
                 n_epochs=self.Darts_FCeV_config.n_epochs,
-                hidden_size=self.Darts_FCeV_config.DartsModelConfig.hidden_size, 
-                lstm_layers=self.Darts_FCeV_config.DartsModelConfig.lstm_layers, 
+                hidden_size=self.Darts_FCeV_config.internal_size,
+                lstm_layers=self.Darts_FCeV_config.n_layers, 
                 num_attention_heads=self.Darts_FCeV_config.DartsModelConfig.num_attention_heads,  
                 full_attention=self.Darts_FCeV_config.DartsModelConfig.full_attention, 
                 dropout=self.Darts_FCeV_config.dropout,
@@ -360,9 +361,9 @@ class DartsFCeV:
             model = RNNModel(input_chunk_length = self.n_lags,
                 training_length= self.n_forecasts,
                 n_epochs=self.Darts_FCeV_config.n_epochs,
-                hidden_dim=self.Darts_FCeV_config.DartsModelConfig.hidden_dim, 
-                model=self.Darts_FCeV_config.DartsModelConfig.model, 
-                n_rnn_layers=self.Darts_FCeV_config.DartsModelConfig.n_rnn_layers,  
+                hidden_dim=self.Darts_FCeV_config.internal_size, 
+                model=self.Darts_FCeV_config.DartsModelConfig.RNNmodel, 
+                n_rnn_layers=self.Darts_FCeV_config.n_layers,  
                 dropout=self.Darts_FCeV_config.dropout,
                 force_reset=True,
                 likelihood=likelihood,
@@ -381,9 +382,9 @@ class DartsFCeV:
                 n_epochs=self.Darts_FCeV_config.n_epochs,
                 generic_architecture=True,
                 num_stacks=self.Darts_FCeV_config.DartsModelConfig.num_stacks,  
-                num_layers=self.Darts_FCeV_config.DartsModelConfig.num_layers,  
+                num_layers=self.Darts_FCeV_config.n_layers,
                 num_blocks=self.Darts_FCeV_config.DartsModelConfig.num_blocks,  
-                layer_widths=self.Darts_FCeV_config.DartsModelConfig.layer_widths,  
+                layer_widths=self.Darts_FCeV_config.internal_size,  
                 expansion_coefficient_dim=self.Darts_FCeV_config.DartsModelConfig.expansion_coefficient_dim,  
                 dropout=self.Darts_FCeV_config.dropout,
                 force_reset=True,
@@ -402,9 +403,9 @@ class DartsFCeV:
                 output_chunk_length= self.n_forecasts,
                 n_epochs=self.Darts_FCeV_config.n_epochs,
                 num_stacks=self.Darts_FCeV_config.DartsModelConfig.num_stacks,  
-                num_layers=self.Darts_FCeV_config.DartsModelConfig.num_layers,  
+                num_layers=self.Darts_FCeV_config.n_layers,  
                 num_blocks=self.Darts_FCeV_config.DartsModelConfig.num_blocks,  
-                layer_widths=self.Darts_FCeV_config.DartsModelConfig.layer_widths,  
+                layer_widths=self.Darts_FCeV_config.internal_size,  
                 MaxPool1d= self.Darts_FCeV_config.DartsModelConfig.max_pool_1d,  
                 dropout=self.Darts_FCeV_config.dropout,
                 force_reset=True,
@@ -432,14 +433,14 @@ class DartsFCeV:
                 random_state = self.Darts_FCeV_config.seed,
                 batch_size = self.Darts_FCeV_config.batch_size,
                 n_epochs=self.Darts_FCeV_config.n_epochs,
-                d_model=self.Darts_FCeV_config.DartsModelConfig.d_model,  
-                nhead=self.Darts_FCeV_config.DartsModelConfig.nhead,  
-                num_encoder_layers=self.Darts_FCeV_config.DartsModelConfig.num_encoder_layers,       
-                num_decoder_layers=self.Darts_FCeV_config.DartsModelConfig.num_decoder_layers,       
+                d_model=self.Darts_FCeV_config.internal_size,  
+                nhead= self.Darts_FCeV_config.internal_size // self.Darts_FCeV_config.DartsModelConfig.n_head_divisor,  
+                num_encoder_layers=self.Darts_FCeV_config.n_layers,       
+                num_decoder_layers=self.Darts_FCeV_config.n_layers,       
                 dim_feedforward=self.Darts_FCeV_config.DartsModelConfig.dim_feedforward, 
                 activation=self.Darts_FCeV_config.DartsModelConfig.activation, 
                 norm_type= self.Darts_FCeV_config.DartsModelConfig.norm_type, 
-            )
+                )
         elif isinstance(self.Darts_FCeV_config.DartsModelConfig, NLinearDartsFCeVConfig):
                 model = NLinearModel(
                 input_chunk_length = self.n_lags,
