@@ -173,7 +173,7 @@ def configure(
     #df_GNSSTEC = pd.read_pickle("data_test/df_GNSSTEC.pkl")
     #df_covariate = pd.read_pickle("data_test/df_covariate.pkl")
     #df_eq = pd.read_pickle("data_test/df_eq.pkl")
-    synthetic_events = pd.read_pickle("data_test/synthetic_raw.pkl")
+    #synthetic_events = pd.read_pickle("data_test/synthetic_raw.pkl")
     
     df_regressor = df_GNSSTEC.reset_index()
     df_other = df_covariate
