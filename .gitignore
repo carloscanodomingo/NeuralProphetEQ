@@ -26,6 +26,7 @@ data/
 lightning_logs/
 __pycache__/
 .ipynb_checkpoints/
+darts_logs/
 
 # JetBrains IDE
 .idea/

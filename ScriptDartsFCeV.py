@@ -73,7 +73,7 @@ from DartsFCeV import NLinearDartsFCeVConfig,TransformerDartsFCeVConfig, DartsFC
 @click.option(
         "--simulation_scenario",
         type = click.Choice(
-            ["TEC", "SALES"]
+            ["TEC", "SALES", "TEC_constant"]
             ),
         default = "TEC"
         )
@@ -164,10 +164,11 @@ def configure(
     torch.manual_seed(seed)
     np.random.seed(seed)
         # Read SR and EQ data
+    config_synthetic = "events"
     if verbose == 0:
         sys.stdout = open(os.devnull, "w")
         sys.stderr = open(os.devnull, "w")
-    if  simulation_scenario == "TEC":
+    if  simulation_scenario == "TEC" or simulation_scenario == "TEC_constant":
         ConfigEQ_d = {
             "dist_start": 1000,
             "dist_delta": 3000,
@@ -182,10 +183,10 @@ def configure(
         df_GNSSTEC, df_covariate, df_eq = prepare_ion_data(data_path, "GRK", freq)
         synthetic_events = pd.read_pickle(data_path+"synthetic_raw.pkl")
         
-        df_signal = df_GNSSTEC.reset_index()
+        df_signal = df_GNSSTEC
         df_covariates = df_covariate
         df_events = prepare_EQ(df_eq, config_events)
-
+        df_synth = prepare_EQ(synthetic_events, config_events)
         forecast_length = timedelta(hours=24)
         question_mark_length = timedelta(hours=24)
         # Time to take into account to predict
@@ -199,7 +200,11 @@ def configure(
 
 
         df_synth = prepare_EQ(synthetic_events, config_events)
-
+        if simulation_scenario == "TEC_constant":
+            df_synth = pd.DataFrame([68., 70., 72., 74., 76., 78., 80.], columns= ["f107"])
+            df_events = pd.DataFrame(df_covariate["f107"])
+            df_covariate = df_covariate.drop("f107", axis = 1)
+            config_synthetic = "constant"
         date_start = pd.Timestamp(2018, 1, 1, 12)
 
     elif simulation_scenario == "SALES":
@@ -289,6 +294,7 @@ def configure(
         "patience": patience,
         "seed": seed,
         "probabilistic": probabilistic,
+        "config_synthetic": config_synthetic
     }
 
     darts_FCeV_config = DartsFCeVConfig(**darts_FCev_config)
@@ -309,7 +315,7 @@ def configure(
     if verbose == 0:
         sys.stdout = open(os.devnull, "w")
         sys.stderr = open(os.devnull, "w")
-    df_synth = prepare_EQ(synthetic_events, config_events)
+    
     current_fcev = FCeV(
         FCev_config,
         darts_FCeV_config,
@@ -343,8 +349,7 @@ def configure(
         sys.exit(0)
         return 0
     elif forecast_type == "iteration":
-        offset_start = pd.Timedelta(days=offset_start)
-        current_fcev.create_iteration(offset_start, total_index)
+        current_fcev.create_iteration(date_start, total_index)
         df_fore = current_fcev.process_iteration(current_index)
         current_fcev.save_results(df_fore)
         sys.exit(0)

@@ -225,7 +225,7 @@ class FCeV:
             + geom_line(aes(y="current", color = "component"),size = 1.5)  # Geometric object to use for drawing
             + geom_line(aes(y="pred", color = "component"),linetype="dashed",size = 1.5 )  # Geometric object to use for drawing
             + theme_minimal() 
-            +theme(legend_position="bottom", figure_size=(18, 12))
+            +theme(legend_position="bottom", figure_size=(10, 6))
             + scale_color_brewer(type="qual", palette="Set1")
                 )
         return plot
