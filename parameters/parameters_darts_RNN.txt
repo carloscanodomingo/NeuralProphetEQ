@@ -26,17 +26,17 @@
 ##    condition is satisfied, FALSE otherwise.
 
 # 1:                     2:                                 3:      4:                             			5:
-historic_lenght          "--historic_lenght="               i      (2, 15) 
-training_lenght_days    "--training_lenght_days="           i      (30, 90) 
+historic_lenght          "--historic_lenght="               i      (2, 40) 
+training_lenght_days    "--training_lenght_days="           i      (41, 360) 
 learning_rate           "--learning_rate="                  i      (1, 4) 
 dropout                 "--dropout="                        o      (0, 0.1, 0.2, 0.3, 0.4, 0.5) 
-batch_size              "--batch_size="                     o      (400,600, 800)
+batch_size              "--batch_size="                     o      (400,600)
 epochs                	"--epochs="                         c      (300)
-n_layers             	"--n_layers="                       i      (1, 5)
-internal_size           "--internal_size="                  o      (4,8, 12,16) 
+n_layers             	"--n_layers="                       i      (1, 6)
+internal_size           "--internal_size="                  o      (4,8, 12,16, 24, 32) 
 use_gpu                 "--use_gpu="                        c      (0) 
 probabilistic           "--probabilistic="                  c      (0, 1) 
-patience                "--patience="                       o      (5,10,15,20, 25, 30)
+patience                "--patience="                       o      (5,10,15,20, 25, 30, 40)
 offset_start            "offset_start="                     c      (730)
 verbose 		"--verbose=" 		            c      (0)
 data_path 		"--data_path="		            c      (/mnt/hum01-home01/ambs/y06068cc/data/)
@@ -45,7 +45,8 @@ model                   "--model="               	    c      (RNN)
 
 TCN_dilation_base       "--TCN_dilation_base="              i      (1, 5)    						| model == "TCN"
 TCN_weight_norm         "--TCN_weight_norm="                c      (1)       						| model == "TCN"
-
+#data_path 		"--data_path="		            c      (/home/carloscano/data/)
+#out_path	        "--out_path="			    c      (/home/carloscano/results/)
 RNN_model               "--RNN_model="                      c     (RNN, LSTM, GRU)         				| model == "RNN"
 
 NBEATS_NHITS_num_blocks "--NBEATS_NHITS_num_blocks="        i      (1, 20)					        | model == "NBEATS" || model == "NHITS"

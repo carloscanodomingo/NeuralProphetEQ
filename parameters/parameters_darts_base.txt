@@ -39,11 +39,11 @@ probabilistic           "--probabilistic="                  c      (0, 1)
 patience                "--patience="                       o      (5,10,15,20, 25, 30)
 offset_start            "offset_start="                     c      (730)
 verbose 		"--verbose=" 		            c      (0)
-## data_path 		"--data_path="		            c      (/mnt/hum01-home01/ambs/y06068cc/data/)
-data_path 		"--data_path="		            c      (/home/carloscano/data/)
-out_path	        "--out_path="			    c      (/home/carloscano/results/)
+data_path 		"--data_path="		            c      (/mnt/hum01-home01/ambs/y06068cc/data/)
+##data_path 		"--data_path="		            c      (/home/carloscano/data/)
+##out_path	        "--out_path="			    c      (/home/carloscano/results/)
 
-##out_path	        "--out_path="			    c      (/mnt/hum01-home01/ambs/y06068cc/output/results/)
+out_path	        "--out_path="			    c      (/mnt/hum01-home01/ambs/y06068cc/output/results/)
 model                   "--model="               	    c      (TCN,RNN,NBEATS,Transformer,NHITS,TFT,NLinear) 
 
 TCN_dilation_base       "--TCN_dilation_base="              i      (1, 5)    						| model == "TCN"
