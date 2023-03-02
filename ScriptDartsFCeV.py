@@ -21,9 +21,9 @@ import sys
 from NPw_aux import prepare_EQ, ConfigEQ, prepare_ion_data
 import click
 import torch
-
+import signal
 MAX_TIMEOUT = 3600/ 3  # MAX TIME 20min
-MAX_VALUE = 200
+MAX_VALUE ="Inf" 
 from FCeV import FCeV, FCeVConfig, METRICS
 
 # click_example.py
@@ -302,6 +302,14 @@ def configure(
     }
 
     FCev_config = FCeVConfig(**FCev_config)
+
+    
+
+    # Read SR and EQ data
+    if verbose == 0:
+        sys.stdout = open(os.devnull, "w")
+        sys.stderr = open(os.devnull, "w")
+    df_synth = prepare_EQ(synthetic_events, config_events)
     current_fcev = FCeV(
         FCev_config,
         darts_FCeV_config,
@@ -313,24 +321,27 @@ def configure(
     )
 
 
+
     if forecast_type == "folds":
         current_fcev.create_folds(date_start, n_iteration=total_index)
         try:
             df_fore = process_fold_with_timeout(current_fcev, current_index)
+            cov_result = (
+                    current_fcev.get_metrics_from_fc(df_fore["BASE"], METRICS.RMSE)
+                    .mean()
+                    .mean()
+            )
         except :
             sys.stdout = sys.__stdout__
             sys.stderr = sys.__stderr__
             print(str(MAX_VALUE) + "\n")
             sys.exit(0)
-        cov_result = (
-            current_fcev.get_metrics_from_fc(df_fore["BASE"], METRICS.RMSE)
-            .mean()
-            .mean()
-        )
+            return 0
         sys.stdout = sys.__stdout__
         sys.stderr = sys.__stderr__
         print(str(cov_result) + "\n")
         sys.exit(0)
+        return 0
     elif forecast_type == "iteration":
         offset_start = pd.Timedelta(days=offset_start)
         current_fcev.create_iteration(offset_start, total_index)
@@ -339,13 +350,26 @@ def configure(
         sys.exit(0)
 
 
+ 
 @func_set_timeout(MAX_TIMEOUT)
 def process_fold_with_timeout(fcev_instance, current_index):
     df_fore = fcev_instance.process_fold(current_index)
     return df_fore
 
+def signal_handler(sig, frame):
+    #sys.stdout = sys.__stdout__
+    #sys.stderr = sys.__stderr__
+    #print(f"Enter signal handler with signal: {sig}") 
+    sys.exit(0)
+
 
 if __name__ == "__main__":
+    handler_sig = [signal.SIGABRT, signal.SIGSEGV]
+    for sig in handler_sig:
+        try:
+            signal.signal(sig, signal_handler)
+        except OSError:
+            continue
     configure()
 
 

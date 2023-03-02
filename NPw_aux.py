@@ -207,7 +207,6 @@ def prepare_EQ(
     d1 = config_eq.dist_start
     df_events["pr"] = get_pr(df_events, d1, d2, m1, m2)
     if config_eq.filter == 1:
-        print(len(df_events))
         df_events = df_events.loc[df_events["pr"] > 1]
         print(len(df_events))
     else:
