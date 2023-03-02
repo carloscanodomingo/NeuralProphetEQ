@@ -18,6 +18,7 @@ from IPython.display import display
 from IPython.core.display import HTML
 import json
 
+from plotnine import ggplot, aes, facet_grid, labs, geom_line,geom_point, theme, geom_ribbon,theme_minimal,scale_color_brewer
 
 from DartsFCeV import DartsFCeV, DartsFCeVConfig
 
@@ -106,20 +107,19 @@ class FCeV:
         self.index_dates = df_input.reset_index()["ds"]
 
 
-    def create_folds(self, k=5, offset_lenght=None):
+    def create_folds(self, date_start, n_iteration):
         """Function to split all data into folds
 
         Args:
             k ():  number of folds
         """
-        if offset_lenght is None:
-            offset_lenght = pd.Timedelta(days=0)
+
         # Own fold method
         self.folds = pd.DataFrame(columns=["start_date", "end_date"])
         print(self.start_date)
-        start_folds = self.start_date + offset_lenght
-        len_folds = (self.duration - offset_lenght) / ( (k + 1))
-        for index_fold in range(k):
+        start_folds = date_start
+        len_folds = (self.end_date - start_folds) / ( n_iteration+ 1)
+        for index_fold in range(n_iteration):
             end_fold = start_folds + ((index_fold + 1) * len_folds)
             index_end_fold = np.argmin(np.abs(self.index_dates - end_fold))
             end_fold = self.index_dates[index_end_fold]
@@ -163,17 +163,17 @@ class FCeV:
         )
         return df_forecast
 
-    def create_iteration(self, offset_lenght, n_iteration):
+    def create_iteration(self, date_start, n_iteration):
         self.iterations = pd.DataFrame(columns=["start_date", "end_date"])
         len_iteration = self.FCeV_config.forecast_length
         print(f"{self.duration} __ {self.FCeV_config.forecast_length}")
-        max_number_iteration = int((self.duration - offset_lenght - self.FCeV_config.forecast_length) // len_iteration)
+        max_number_iteration = int((self.end_date- date_start- self.FCeV_config.forecast_length) // len_iteration)
         if n_iteration is None:
             n_iteration = max_number_iteration
         else:
             n_iteration = n_iteration if max_number_iteration > n_iteration else max_number_iteration
         for index_iter in range(n_iteration):
-            end_fold = self.start_date + offset_lenght  + (index_iter * self.FCeV_config.forecast_length)
+            end_fold = date_start  + (index_iter * self.FCeV_config.forecast_length)
             index_end_fold = np.argmin(np.abs(self.index_dates - end_fold))
             end_fold = self.index_dates[index_end_fold]
             start_fold = end_fold - self.FCeV_config.training_length
@@ -207,11 +207,29 @@ class FCeV:
   
     def save_results(self, df_forecast):
         file_name = df_forecast["BASE"].index[0].strftime("%Y_%m_%d_%H_%M_%S")
-        with open(f"{self.output_path}df_forecast_{file_name}", 'wb') as f:
+        with open(f"{self.output_path}df_forecast_{file_name}.pkl", 'wb') as f:
             pickle.dump(df_forecast, f)
     @staticmethod
     def plot_results(df_forecast):
-        ...
+        current_forecast = df_forecast.stack(level=1).reset_index(1)
+        if "uncer" in current_forecast.columns:
+            current_forecast["uncer_min"] = current_forecast['pred'] - current_forecast['uncer']
+            current_forecast["uncer_max"] = current_forecast['pred'] + current_forecast['uncer']
+        else:
+            current_forecast["uncer_min"] = current_forecast['pred']
+            current_forecast["uncer_max"] = current_forecast['pred']
+        
+        plot = (ggplot(current_forecast.reset_index()) +  # What data to use
+             aes(x="ds")  # What variable to use
+            + geom_ribbon(aes(y = "pred", ymin = "uncer_min", ymax = "uncer_max", fill = "component"), alpha = .4) 
+            + geom_line(aes(y="current", color = "component"),size = 1.5)  # Geometric object to use for drawing
+            + geom_line(aes(y="pred", color = "component"),linetype="dashed",size = 1.5 )  # Geometric object to use for drawing
+            + theme_minimal() 
+            +theme(legend_position="bottom", figure_size=(18, 12))
+            + scale_color_brewer(type="qual", palette="Set1")
+                )
+        return plot
+    
     @staticmethod
     def read_result(result_path):
         all_dict = {}

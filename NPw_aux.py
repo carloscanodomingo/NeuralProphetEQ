@@ -186,7 +186,7 @@ def prepare_eq(
     df_events_copy["dist"] = -df_events["dist"]
     scaler = MinMaxScaler()
     df_scaled = drop_scale(df_events_copy, scaler, drop)
-    return (df_scaled, scaler, df_events)
+    return (df_scaled, scaler, df_events_copy)
 
 @dataclass
 class ConfigEQ:
@@ -206,8 +206,12 @@ def prepare_EQ(
     d2 = config_eq.dist_start + config_eq.dist_delta
     d1 = config_eq.dist_start
     df_events["pr"] = get_pr(df_events, d1, d2, m1, m2)
-    if filter == 1:
+    if config_eq.filter == 1:
+        print(len(df_events))
         df_events = df_events.loc[df_events["pr"] > 1]
+        print(len(df_events))
+    else:
+        print("NO")
     df_events_copy = df_events.copy()
     df_events_copy["depth"] = -df_events["depth"]
     df_events_copy["dist"] = -df_events["dist"]

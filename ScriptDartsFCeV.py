@@ -70,6 +70,13 @@ from DartsFCeV import NLinearDartsFCeVConfig,TransformerDartsFCeVConfig, DartsFC
     ),
     required=True,
 )
+@click.option(
+        "--simulation_scenario",
+        type = click.Choice(
+            ["TEC", "SALES"]
+            ),
+        default = "TEC"
+        )
 
 
 # TCN Model
@@ -136,6 +143,7 @@ def configure(
     config,
     n_iteration,
     seed,
+    simulation_scenario,
     tcn_dilation_base=None,
     tcn_weight_norm=None,
     rnn_model=None,
@@ -155,38 +163,72 @@ def configure(
     torch.set_num_threads(1)
     torch.manual_seed(seed)
     np.random.seed(seed)
-    ConfigEQ_d = {
-        "dist_start": 1000,
-        "dist_delta": 3000,
-        "mag_start": 4.5,
-        "mag_delta": 2,
-        "filter": True,
-        "drop": ["arc_cos", "arc_sin"],
-    }
-    config_events = ConfigEQ(**ConfigEQ_d)
+        # Read SR and EQ data
+    if verbose == 0:
+        sys.stdout = open(os.devnull, "w")
+        sys.stderr = open(os.devnull, "w")
+    if  simulation_scenario == "TEC":
+        ConfigEQ_d = {
+            "dist_start": 1000,
+            "dist_delta": 3000,
+            "mag_start": 4.5,
+            "mag_delta": 2,
+            "filter": True,
+            "drop": ["arc_cos", "arc_sin"],
+        }
+        config_events = ConfigEQ(**ConfigEQ_d)
 
-    freq = timedelta(minutes=30)
-    df_GNSSTEC, df_covariate, df_eq = prepare_ion_data(data_path, "GRK", freq)
-    synthetic_events = pd.read_pickle(data_path+"synthetic_raw.pkl")
-    
-    
-    #df_GNSSTEC = pd.read_pickle("data_test/df_GNSSTEC.pkl")
-    #df_covariate = pd.read_pickle("data_test/df_covariate.pkl")
-    #df_eq = pd.read_pickle("data_test/df_eq.pkl")
-    #synthetic_events = pd.read_pickle("data_test/synthetic_raw.pkl")
-    
-    df_regressor = df_GNSSTEC.reset_index()
-    df_other = df_covariate
-    df_events = prepare_EQ(df_eq, config_events)
+        freq = timedelta(minutes=30)
+        df_GNSSTEC, df_covariate, df_eq = prepare_ion_data(data_path, "GRK", freq)
+        synthetic_events = pd.read_pickle(data_path+"synthetic_raw.pkl")
+        
+        df_signal = df_GNSSTEC.reset_index()
+        df_covariates = df_covariate
+        df_events = prepare_EQ(df_eq, config_events)
 
-    forecast_length = timedelta(hours=24)
-    question_mark_length = timedelta(hours=24)
-    # Time to take into account to predict
-    historic_lenght = timedelta(days=historic_lenght)
-    training_lenght = timedelta(days=training_lenght_days)
+        forecast_length = timedelta(hours=24)
+        question_mark_length = timedelta(hours=24)
+        # Time to take into account to predict
+        historic_lenght = timedelta(days=historic_lenght)
+        training_lenght = timedelta(days=training_lenght_days)
 
-    if epochs == 0:
-        epochs = None
+        if epochs == 0:
+            epochs = None
+
+        
+
+
+        df_synth = prepare_EQ(synthetic_events, config_events)
+
+        date_start = pd.Timestamp(2018, 1, 1, 12)
+
+    elif simulation_scenario == "SALES":
+        datapath_sales =  data_path + "kaggle/store-sales-time-series-forecasting/"
+        df_train =  pd.read_csv(datapath_sales + "train.csv", parse_dates=["date"]).rename(columns = {"date":"ds"})
+        df_test =  pd.read_csv(datapath_sales + "test.csv", parse_dates=["date"]).rename(columns = {"date":"ds"})
+        df_train_selected = df_train[(df_train["store_nbr"] == 54) & ((df_train["family"] == "AUTOMOTIVE")) ]
+        df_train_selected = df_train_selected.reset_index().drop(["store_nbr", 'family', "id", "index"], axis = 1).set_index("ds")
+        df_signal = df_train_selected.drop("onpromotion", axis =1) #["sales"]
+        df_events = df_train_selected[df_train_selected["onpromotion"] > 0].drop("sales", axis = 1)
+        df_events["onpromotion"] = (df_events["onpromotion"] > 0)
+        df_events["onpromotion"] = 1
+        df_cov1 = df_train[(df_train["store_nbr"] == 54) & ((df_train["family"] == "BREAD/BAKERY")) ]
+        df_cov1 = df_cov1.reset_index().drop(["store_nbr", 'family', "id", "index", "onpromotion"], axis = 1).set_index("ds")
+        df_cov2 = df_train[(df_train["store_nbr"] == 1) & ((df_train["family"] == "AUTOMOTIVE")) ]
+        df_cov2= df_cov2.reset_index().drop(["store_nbr", 'family', "id", "index", "onpromotion"], axis = 1).set_index("ds")
+
+        df_covariates = pd.concat([df_cov1, df_cov2], axis = 1)
+        df_covariates.columns =  ["bread_54", "auto_1"]
+        df_synth = pd.DataFrame([1], columns = ["onpromotion"])
+        forecast_length = timedelta(hours=24 * 4)
+        question_mark_length = timedelta(hours=24 * 4)
+        # Time to take into account to predict 
+        historic_lenght =  timedelta(days=historic_lenght)
+        training_lenght = timedelta(days=training_lenght_days)
+        freq = pd.Timedelta(days=1)
+        date_start = pd.Timestamp(2017, 1, 1)
+    else:
+        raise KeyError("Simulation type not implemented")
     if model == "TCN":
         TCN_darts_FCeV_config = {
             "dilation_base": tcn_dilation_base,
@@ -232,7 +274,8 @@ def configure(
             "const_init": nlinear_const_init,
         }
         DartsModelConfig = NLinearDartsFCeVConfig(**NLinear_darts_FCeV_config)
-
+    else:
+        raise ValueError("Not Valid Model")
     darts_FCev_config = {
         "DartsModelConfig": DartsModelConfig,
         "dropout": dropout,
@@ -259,27 +302,19 @@ def configure(
     }
 
     FCev_config = FCeVConfig(**FCev_config)
-
-    
-
-    # Read SR and EQ data
-    if verbose == 0:
-        sys.stdout = open(os.devnull, "w")
-        # sys.stderr = open(os.devnull, "w")
-    df_synth = prepare_EQ(synthetic_events, config_events)
     current_fcev = FCeV(
         FCev_config,
         darts_FCeV_config,
-        df_GNSSTEC,
-        df_covariate,
+        df_signal,
+        df_covariates,
         df_events,
         out_path,
         df_synth,
     )
+
+
     if forecast_type == "folds":
-        current_fcev.create_folds(
-            k=total_index, offset_lenght=pd.Timedelta(days=offset_start, hours=12)
-        )
+        current_fcev.create_folds(date_start, n_iteration=total_index)
         try:
             df_fore = process_fold_with_timeout(current_fcev, current_index)
         except :

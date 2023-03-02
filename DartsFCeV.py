@@ -54,6 +54,7 @@ class DartsFCeVConfig:
     patience: int
     seed: int
     probabilistic: bool
+    config_synthetic: str = "events"
 
 @dataclass
 class TCNDartsFCeVConfig(metaclass = DartModelMetaClass):
@@ -149,13 +150,17 @@ class DartsFCeV:
             self.covariates = None
         self.df_events = df_events
         # Convert from wide format to long format
+        self.config_synthetic = Darts_FCeV_config.config_synthetic
         if synthetic_events.empty:
             self.synthetic_events = None  # self.get_synthetic_events()
         else:
-            self.synthetic_events = self.prepare_synthetic_events(synthetic_events, 5)
-
+            self.synthetic_events = self.prepare_synthetic_events(synthetic_events)
 
         self.index_date = df_input.index
+        df_events = self.df_events.reindex(self.index_date).fillna(0.0)
+        
+        self.events =  self.df_to_ts(df_events)
+        
         self.folds = pd.DataFrame(columns=["start_date", "end_date"])
 
         #Create the Darts model
@@ -203,21 +208,29 @@ class DartsFCeV:
         val_series = scaler.transform(val_series)
         series_scaler = scaler.transform(series)
         return train_series, val_series, series_scaler, scaler
-    def prepare_synthetic_events(self,synthetic_events,  periods):
+    
+    
+    
+    def prepare_synthetic_events(self,synthetic_events):
+        periods =5
         if synthetic_events is None:
             raise ValueError("Syntheticevents not valid")
         all_dict = {}
-        for idx, synthetic_event in synthetic_events.iterrows():
-            event_offset = [
-                int(self.n_forecasts/ (periods + 1) * x)
-                for x in range(1, periods + 1)
-            ]
-            current_dict = {}
-            for idx_offset in event_offset:
-                current_event = pd.DataFrame(0.0, index=np.arange(self.n_forecasts), columns = synthetic_events.columns)
-                current_event.iloc[idx_offset] = synthetic_event
-                current_dict[f"{idx_offset}"] = current_event
-            all_dict[f"SYNTH_{idx}"] = current_dict
+        if self.config_synthetic == "events":
+            for idx, synthetic_event in synthetic_events.iterrows():
+                event_offset = [
+                    int(self.n_forecasts/ (periods + 1) * x)
+                    for x in range(1, periods + 1)
+                ]
+                current_dict = {}
+                for idx_offset in event_offset:
+                    current_event = pd.DataFrame(0.0, index=np.arange(self.n_forecasts), columns = synthetic_events.columns)
+                    current_event.iloc[idx_offset] = synthetic_event
+                    current_dict[f"{idx_offset}"] = current_event
+                all_dict[f"SYNTH_{idx}"] = current_dict
+        elif self.config_synthetic == "constant":
+            for idx, synthetic_event in synthetic_events.iterrows():
+                all_dict[f"{idx}"] = pd.concat([pd.DataFrame(synthetic_event).T]*self.n_forecasts, ignore_index = True)
         return all_dict
 
     def process_forecast(self, start_datetime, end_datetime):
@@ -234,7 +247,6 @@ class DartsFCeV:
         question_mark_start = (
             start_forecast_time - self.FCeV_config.question_mark_length
         )
-        print(question_mark_start)
 
         df_events = self.df_events.iloc[self.df_events.index < question_mark_start]
         df_events = self.df_events.reindex(self.index_date).fillna(0.0)
@@ -244,6 +256,7 @@ class DartsFCeV:
         train_base, val_base, series_base, scaler_base = self.preprocess_series(
             self.input_series, start_datetime, end_datetime, start_forecast_time
         )
+        print(f"train start: {train_base.start_time()} end: {train_base.end_time()} - val start: {val_base.start_time()} val end: {val_base.end_time()}")
         if self.covariates is not None:
             (
                 train_covariate,
@@ -262,7 +275,7 @@ class DartsFCeV:
                 val_events,
                 series_events,
                 scaler_events,
-        ) = self.preprocess_series(series_ts, start_datetime, end_datetime, start_forecast_time)
+        ) = self.preprocess_series(self.events, start_datetime, end_datetime, start_forecast_time)
         # Todo Improve val 
         training_val = series_base[-(len(val_base) + self.n_lags):]
 
@@ -280,7 +293,7 @@ class DartsFCeV:
                 self.npw_df.to_csv(path)
                 break
     def fit(self, train_series,val_series, train_covariate, train_events ):
-        """
+        """ This function ensure that the covariates for forecasting are NOT including in the trainig by using slice_intersect and drop_after
 
         Args:
             train_series (): 
@@ -294,9 +307,9 @@ class DartsFCeV:
             covariates_with_events = train_events
 
         if self.Darts_FCeV_config.DartsModelConfig.covariate_type == "Future":
-            self.model = self.model.fit(train_series, val_series= val_series,val_future_covariates = covariates_with_events, future_covariates=covariates_with_events, epochs = self.Darts_FCeV_config.n_epochs,verbose = self.FCeV_config.verbose)
+            self.model = self.model.fit(train_series, val_series= val_series,val_future_covariates = covariates_with_events, future_covariates=covariates_with_events.slice_intersect(train_series), epochs = self.Darts_FCeV_config.n_epochs,verbose = self.FCeV_config.verbose)
         else: 
-            self.model = self.model.fit(train_series, val_series= val_series,val_past_covariates = covariates_with_events, past_covariates=covariates_with_events, epochs = self.Darts_FCeV_config.n_epochs,verbose = self.FCeV_config.verbose)
+            self.model = self.model.fit(train_series, val_series= val_series,val_past_covariates = covariates_with_events, past_covariates=covariates_with_events.drop_after(train_series.end_time() - self.FCeV_config.forecast_length + self.FCeV_config.freq ), epochs = self.Darts_FCeV_config.n_epochs,verbose = self.FCeV_config.verbose)
 
     def create_dart_model(self):
         early_stopper = EarlyStopping("val_loss", min_delta=0.0001, patience=self.Darts_FCeV_config.patience, mode = "min")
@@ -465,26 +478,24 @@ class DartsFCeV:
         forecast_result = {}
         forecast_uncer = {}
         df_forecast = self.one_step_test( val_series,val_covariate, val_events)
+
         forecast_result["BASE"] = df_forecast
+        df = val_events.pd_dataframe() 
+        df[:] = 0.0
+        val_evnts_empty= darts.TimeSeries.from_dataframe(df)
+        df_forecast = self.one_step_test( val_series,val_covariate, val_evnts_empty)
+        forecast_result["EMPTY"] = df_forecast
         # forecast_uncer["BASE"] = df_uncer
         if self.synthetic_events is None:
             return forecast_result, forecast_uncer
- 
         for synth_key, synth_dict in self.synthetic_events.items():
             offset_forecast = {}
-            offset_uncertainty = {}
-            for offset, df_offset in synth_dict.items():
-                df_synth = df_offset.set_index(val_series.time_index)
-                ts_syhtn = self.df_to_ts(df_synth)
-                if self.Darts_FCeV_config.DartsModelConfig.covariate_type == "Past":
-                    ts_syhtn = ts_syhtn.shift(-self.n_forecasts)
-                    ts_syhtn = scaler_events.transform(ts_syhtn)
-                    before = val_events.drop_after(ts_syhtn.start_time())
-                    after = val_events.drop_before(ts_syhtn.end_time())
-                    ts_syhtn = before.append(ts_syhtn).append(after)
-                else:
-                    ts_syhtn = scaler_events.transform(ts_syhtn)
-                    ts_syhtn = val_events.drop_after(ts_syhtn.start_time()).append(ts_syhtn)
+            if isinstance(synth_dict, pd.DataFrame):
+                list_dicts = [(synth_key, synth_dict)]
+            else:
+                list_dicts = synth_dict.items()
+            for offset, df_offset in list_dicts:
+                ts_syhtn = self.compose_synth(df_offset, val_series, val_events, scaler_events)
                 ts_syhtn = ts_syhtn.astype("float32")
                 df_forecast = self.one_step_test( val_series, val_covariate, ts_syhtn)
                 offset_forecast[f"{offset}"] = df_forecast
@@ -493,7 +504,19 @@ class DartsFCeV:
             # forecast_uncer[f"{synth_key}"] = offset_uncertainty
 
         return forecast_result
-        
+    def compose_synth(self, df_synth, val_series, val_events, scaler_events):
+        df_synth = df_synth.set_index(val_series.time_index)
+        ts_syhtn = self.df_to_ts(df_synth)
+        if self.Darts_FCeV_config.DartsModelConfig.covariate_type == "Past":
+            ts_syhtn = ts_syhtn.shift(-self.n_forecasts)
+            ts_syhtn = scaler_events.transform(ts_syhtn)
+            before = val_events.drop_after(ts_syhtn.start_time())
+            after = val_events.drop_before(ts_syhtn.end_time())
+            ts_syhtn = before.append(ts_syhtn).append(after)
+        else:
+            ts_syhtn = scaler_events.transform(ts_syhtn)
+            ts_syhtn = val_events.drop_after(ts_syhtn.start_time()).append(ts_syhtn)
+        return ts_syhtn
     def one_step_test(self,  base, covariate,events):
         if self.Darts_FCeV_config.probabilistic:
             n_samples = 1000
