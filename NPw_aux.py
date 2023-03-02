@@ -206,7 +206,7 @@ def prepare_EQ(
     d2 = config_eq.dist_start + config_eq.dist_delta
     d1 = config_eq.dist_start
     df_events["pr"] = get_pr(df_events, d1, d2, m1, m2)
-    if filter == 1:
+    if config_eq.filter == 1:
         df_events = df_events.loc[df_events["pr"] > 1]
     df_events_copy = df_events.copy()
     df_events_copy["depth"] = -df_events["depth"]

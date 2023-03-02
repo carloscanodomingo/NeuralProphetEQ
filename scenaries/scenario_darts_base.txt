@@ -11,7 +11,7 @@
 
 ## File that contains the description of the parameters of the target
 ## algorithm.
-parameterFile = "./parameters_darts.txt"
+parameterFile = "../parameters/parameters_darts_base.txt"
 
 ## File that contains a list of logical expressions that cannot be TRUE for
 ## any evaluated configuration. If empty or NULL, do not use forbidden
@@ -34,7 +34,7 @@ trainInstancesDir = ""
 ## File that contains a list of training instances and optionally additional
 ## parameters for them. If trainInstancesDir is provided, irace will search
 ## for the files in this folder.
-trainInstancesFile = "instances-list_darts.txt"
+trainInstancesFile = "../instances/instances-list_base.txt"
 
 ## Randomly sample the training instances or use them in the order given.
 # sampleInstances = 1
@@ -70,7 +70,7 @@ trainInstancesFile = "instances-list_darts.txt"
 
 ## Executable called for each configuration that executes the target algorithm
 ## to be tuned. See the templates and examples provided.
-targetRunner = "ScriptDartsFCeV.py"
+targetRunner = "../ScriptDartsFCeV.py"
 ## Executable that will be used to launch the target runner, when targetRunner
 ## cannot be executed directly (.e.g, a Python script in Windows).
 # targetRunnerLauncher = ""
@@ -103,7 +103,7 @@ targetRunner = "ScriptDartsFCeV.py"
 
 ## Maximum number of runs (invocations of targetRunner) that will be
 ## performed. It determines the maximum budget of experiments for the tuning.
-maxExperiments = 3000
+maxExperiments = 600
 
 ## Maximum total execution time in seconds for the executions of targetRunner.
 ## targetRunner must return two values: cost and time.
