@@ -37,6 +37,7 @@ from DartsFCeV import NLinearDartsFCeVConfig,TransformerDartsFCeVConfig, DartsFC
 @click.argument("config", nargs=1, default="NO_NAME")
 @click.option("--out_path", required=True)
 @click.option("--data_path", required=True)
+@click.option("--log_path", default = None)
 @click.command(
     context_settings=dict(ignore_unknown_options=True, allow_extra_args=True)
 )
@@ -121,6 +122,7 @@ from DartsFCeV import NLinearDartsFCeVConfig,TransformerDartsFCeVConfig, DartsFC
 
 @click.option("--NLinear_const_init", type=int, required=False)
 def configure(
+    log_path,
     verbose,
     epochs,
     historic_lenght,
@@ -312,9 +314,12 @@ def configure(
     
 
     # Read SR and EQ data
-    if verbose == 0:
+    if log_path is None:
         sys.stdout = open(os.devnull, "w")
         sys.stderr = open(os.devnull, "w")
+    else:
+        sys.stdout = open('log_path', 'w')
+        sys.stderr = sys.stdout
     
     current_fcev = FCeV(
         FCev_config,
