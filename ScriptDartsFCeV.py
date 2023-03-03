@@ -183,12 +183,11 @@ def configure(
 
         freq = timedelta(minutes=30)
         df_GNSSTEC, df_covariate, df_eq = prepare_ion_data(data_path, "GRK", freq)
-        synthetic_events = pd.read_pickle(data_path+"synthetic_raw.pkl")
+        
         
         df_signal = df_GNSSTEC
         df_covariates = df_covariate
-        df_events = prepare_EQ(df_eq, config_events)
-        df_synth = prepare_EQ(synthetic_events, config_events)
+        
         forecast_length = timedelta(hours=24)
         question_mark_length = timedelta(hours=24)
         # Time to take into account to predict
@@ -198,11 +197,11 @@ def configure(
         if epochs == 0:
             epochs = None
 
-        
-
-
-        df_synth = prepare_EQ(synthetic_events, config_events)
-        if simulation_scenario == "TEC_constant":
+        if simulation_scenario == "TEC":
+            synthetic_events = pd.read_pickle(data_path+"synthetic_raw.pkl")
+            df_events = prepare_EQ(df_eq, config_events)
+            df_synth = prepare_EQ(synthetic_events, config_events)
+        elif simulation_scenario == "TEC_constant":
             df_synth = pd.DataFrame([68., 70., 72., 74., 76., 78., 80.], columns= ["f107"])
             df_events = pd.DataFrame(df_covariate["f107"])
             df_covariate = df_covariate.drop("f107", axis = 1)
@@ -318,7 +317,7 @@ def configure(
         sys.stdout = open(os.devnull, "w")
         sys.stderr = open(os.devnull, "w")
     else:
-        sys.stdout = open('log_path', 'w')
+        sys.stdout = open(log_path, 'w')
         sys.stderr = sys.stdout
     
     current_fcev = FCeV(
