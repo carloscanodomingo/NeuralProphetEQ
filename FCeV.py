@@ -240,9 +240,9 @@ class FCeV:
                     # NO INNER DICT
                     if isinstance(value_outer, pd.DataFrame):
                         if key_outer in all_dict:
-                            all_dict[key_outer] = pd.concat([all_dict[key_outer], value_outer])
+                            all_dict[key_outer] = pd.concat([all_dict[key_outer], value_outer]).sort_index()
                         else:
-                            all_dict[key_outer] = value_outer
+                            all_dict[key_outer] = value_outer.sort_index()
                     # Inner dict
                     else:
                         
@@ -251,9 +251,9 @@ class FCeV:
                         for key_inner, value_inner in value_outer.items():
                            
                             if key_inner in all_dict[key_outer]:
-                                all_dict[key_outer][key_inner] = pd.concat([all_dict[key_outer][key_inner], value_inner])
+                                all_dict[key_outer][key_inner] = pd.concat([all_dict[key_outer][key_inner], value_inner]).sort_index()
                             else:
-                                all_dict[key_outer][key_inner] = value_inner
+                                all_dict[key_outer][key_inner] = value_inner.sort_index()
         return all_dict
     def get_binary_perform(self, metrics, min_limit, max_limit, config_events=None):
         df = self.get_binary_results(metrics, min_limit, max_limit, config_events)
