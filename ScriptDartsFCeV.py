@@ -16,13 +16,14 @@ import pandas as pd
 import numpy as np
 import logging
 import pandas as pd
+from multiprocessing import Process, Queue
 from NPw import ConfigEQ
 import sys
 from NPw_aux import prepare_EQ, ConfigEQ, prepare_ion_data
 import click
 import torch
 import signal
-MAX_TIMEOUT = 3600/ 3  # MAX TIME 20min
+MAX_TIMEOUT = 10 #3600/ 3  # MAX TIME 20min
 MAX_VALUE ="Inf" 
 from FCeV import FCeV, FCeVConfig, METRICS
 
@@ -334,24 +335,27 @@ def configure(
 
     if forecast_type == "folds":
         current_fcev.create_folds(date_start, n_iteration=total_index)
-        try:
-            df_fore = process_fold_with_timeout(current_fcev, current_index)
+        queue = Queue()
+        program = Process(target= process_fold_with_timeout, args=(current_fcev, current_index, queue))
+        program.start()
+        program.join(timeout = MAX_TIMEOUT)
+        program.terminate()
+        if program.exitcode() is None:
+            sys.stdout = sys.__stdout__
+            sys.stderr = sys.__stderr__
+            print(str(MAX_VALUE) + "\n")
+            sys.exit(0)
+        if program.exitcode == 0:
+            df_fore = queue.get()
             cov_result = (
                     current_fcev.get_metrics_from_fc(df_fore["BASE"], METRICS.RMSE)
                     .mean()
                     .mean()
             )
-        except :
             sys.stdout = sys.__stdout__
             sys.stderr = sys.__stderr__
-            print(str(MAX_VALUE) + "\n")
+            print(str(cov_result) + "\n")
             sys.exit(0)
-            return 0
-        sys.stdout = sys.__stdout__
-        sys.stderr = sys.__stderr__
-        print(str(cov_result) + "\n")
-        sys.exit(0)
-        return 0
     elif forecast_type == "iteration":
         current_fcev.create_iteration(date_start, total_index)
         df_fore = current_fcev.process_iteration(current_index)
@@ -360,15 +364,15 @@ def configure(
 
 
  
-@func_set_timeout(MAX_TIMEOUT)
-def process_fold_with_timeout(fcev_instance, current_index):
+def process_fold_with_timeout(fcev_instance, current_index, queue):
     df_fore = fcev_instance.process_fold(current_index)
-    return df_fore
+    queue.put(df_fore)
+    return 0
 
 def signal_handler(sig, frame):
-    #sys.stdout = sys.__stdout__
-    #sys.stderr = sys.__stderr__
-    #print(f"Enter signal handler with signal: {sig}") 
+    sys.stdout = sys.__stdout__
+    sys.stderr = sys.__stderr__
+    print(str(201) + "\n")
     sys.exit(0)
 
 
