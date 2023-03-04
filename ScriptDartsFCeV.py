@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3 
 """
 %load_ext autoreload
 %autoreload 2
@@ -23,10 +23,10 @@ from NPw_aux import prepare_EQ, ConfigEQ, prepare_ion_data
 import click
 import torch
 import signal
-MAX_TIMEOUT = 10 #3600/ 3  # MAX TIME 20min
+MAX_TIMEOUT = 3600/ 3  # MAX TIME 20min
 MAX_VALUE ="Inf" 
 from FCeV import FCeV, FCeVConfig, METRICS
-
+import time
 # click_example.py
 
 from DartsFCeV import NLinearDartsFCeVConfig,TransformerDartsFCeVConfig, DartsFCeVConfig,NHITSDartsFCeVConfig, NBEATSDartsFCeVConfig,RNNDartsFCeVConfig,TCNDartsFCeVConfig, TFTDartsFCeVConfig
@@ -203,7 +203,7 @@ def configure(
             df_events = prepare_EQ(df_eq, config_events)
             df_synth = prepare_EQ(synthetic_events, config_events)
         elif simulation_scenario == "TEC_constant":
-            df_synth = pd.DataFrame([68., 70., 72., 74., 76., 78., 80.], columns= ["f107"])
+            df_synth = pd.DataFrame(np.arange(60, 85,1), columns= ["f107"])
             df_events = pd.DataFrame(df_covariate["f107"])
             df_covariate = df_covariate.drop("f107", axis = 1)
             config_synthetic = "constant"
@@ -305,7 +305,7 @@ def configure(
         "forecast_length": forecast_length,
         "question_mark_length": question_mark_length,
         "training_length": training_lenght,
-        "verbose": True,
+        "verbose": verbose,
         "input_length": historic_lenght,
     }
 
@@ -315,8 +315,9 @@ def configure(
 
     # Read SR and EQ data
     if log_path is None:
-        sys.stdout = open(os.devnull, "w")
-        sys.stderr = open(os.devnull, "w")
+        if verbose == 0:
+            sys.stdout = open(os.devnull, "w")
+            sys.stderr = open(os.devnull, "w")
     else:
         sys.stdout = open(log_path, 'w')
         sys.stderr = sys.stdout
@@ -338,17 +339,26 @@ def configure(
         queue = Queue()
         program = Process(target= process_fold_with_timeout, args=(current_fcev, current_index, queue))
         program.start()
-        program.join(timeout = MAX_TIMEOUT)
-        program.terminate()
-        if program.exitcode() is None:
+        try:
+            df_fore = queue.get(timeout = MAX_TIMEOUT)
+        except: 
+            queue.close()
+            program.terminate()
+            del queue
             sys.stdout = sys.__stdout__
             sys.stderr = sys.__stderr__
-            print(str(MAX_VALUE) + "\n")
+            print(str(MAX_VALUE) + "\n", flush=True)
+            sys.stdout = open(os.devnull, "w")
+            sys.stderr = open(os.devnull, "w")
             sys.exit(0)
-        if program.exitcode == 0:
-            df_fore = queue.get()
+
+        program.join(timeout = 1)
+        program.terminate()
+        if df_fore is not None:
+            queue.close()
+            del queue
             cov_result = (
-                    current_fcev.get_metrics_from_fc(df_fore["BASE"], METRICS.RMSE)
+                    current_fcev.get_metrics_from_fc(df_fore["BASE"]["current"], df_fore["BASE"]["pred"], METRICS.RMSE)
                     .mean()
                     .mean()
             )
@@ -356,17 +366,36 @@ def configure(
             sys.stderr = sys.__stderr__
             print(str(cov_result) + "\n")
             sys.exit(0)
+        else:
+            sys.stdout = sys.__stdout__
+            sys.stderr = sys.__stderr__
+            print(str(MAX_VALUE) + "\n", flush=True)
+            sys.stdout = open(os.devnull, "w")
+            sys.stderr = open(os.devnull, "w")
+            sys.exit(0)
+            pass
+
     elif forecast_type == "iteration":
         current_fcev.create_iteration(date_start, total_index)
         df_fore = current_fcev.process_iteration(current_index)
         current_fcev.save_results(df_fore)
         sys.exit(0)
-
+        sys.stdout = open(os.devnull, "w")
+        sys.stderr = open(os.devnull, "w")
+    return 0
 
  
 def process_fold_with_timeout(fcev_instance, current_index, queue):
-    df_fore = fcev_instance.process_fold(current_index)
+    if fcev_instance.FCeV_model.FCeV_config.verbose == 0:
+        sys.stdout = open(os.devnull, "w")
+        sys.stderr = open(os.devnull, "w")
+    try:
+        df_fore = fcev_instance.process_fold(current_index)
+    except:
+        queue.put(None)
+    print(f"before queue put")
     queue.put(df_fore)
+    print(f"after queue put")
     return 0
 
 def signal_handler(sig, frame):
@@ -377,6 +406,7 @@ def signal_handler(sig, frame):
 
 
 if __name__ == "__main__":
+    torch.multiprocessing.set_start_method('spawn')
     handler_sig = [signal.SIGABRT, signal.SIGSEGV]
     for sig in handler_sig:
         try:

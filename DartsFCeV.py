@@ -256,7 +256,6 @@ class DartsFCeV:
         train_base, val_base, series_base, scaler_base = self.preprocess_series(
             self.input_series, start_datetime, end_datetime, start_forecast_time
         )
-        print(f"train start: {train_base.start_time()} end: {train_base.end_time()} - val start: {val_base.start_time()} val end: {val_base.end_time()}")
         if self.covariates is not None:
             (
                 train_covariate,
@@ -446,11 +445,11 @@ class DartsFCeV:
                 random_state = self.Darts_FCeV_config.seed,
                 batch_size = self.Darts_FCeV_config.batch_size,
                 n_epochs=self.Darts_FCeV_config.n_epochs,
-                d_model=self.Darts_FCeV_config.internal_size,  
-                nhead= self.Darts_FCeV_config.internal_size // self.Darts_FCeV_config.DartsModelConfig.n_head_divisor,  
+                d_model=self.Darts_FCeV_config.internal_size  * self.Darts_FCeV_config.DartsModelConfig.n_head_divisor,  
+                nhead=  self.Darts_FCeV_config.DartsModelConfig.n_head_divisor,  
                 num_encoder_layers=self.Darts_FCeV_config.n_layers,       
                 num_decoder_layers=self.Darts_FCeV_config.n_layers,       
-                dim_feedforward=self.Darts_FCeV_config.DartsModelConfig.dim_feedforward, 
+                dim_feedforward=self.Darts_FCeV_config.DartsModelConfig.dim_feedforward , 
                 activation=self.Darts_FCeV_config.DartsModelConfig.activation, 
                 norm_type= self.Darts_FCeV_config.DartsModelConfig.norm_type, 
                 )

@@ -187,18 +187,18 @@ class FCeV:
         mean_pred_values = df_forecast["current"].mean().mean()
         return df_forecast.mean() / mean_pred_values
     @staticmethod
-    def get_metrics_from_fc(df_forecast, metrics):
+    def get_metrics_from_fc(current, pred, metrics):
         if metrics is METRICS.CoV:
             return (
-                df_forecast["current"]
-                .sub(df_forecast["pred"])
+                current
+                .sub(pred)
                 .pow(2)
-                .pow(1 / 2) / df_forecast["current"]
+                .pow(1 / 2) / pred
             ) * 100
         elif metrics is METRICS.RMSE:
             return (
-            df_forecast["current"]
-            .sub(df_forecast["pred"])
+            current
+            .sub(pred)
             .pow(2)
             .pow(1 / 2) 
         ) * 100
@@ -229,11 +229,39 @@ class FCeV:
             + scale_color_brewer(type="qual", palette="Set1")
                 )
         return plot
-    
+    def predict_from_metrics(current, pred, uncertainty, METRICS, synth):
+        ...
     @staticmethod
     def read_result(result_path):
         all_dict = {}
-        for index_path in Path(result_path).rglob("*"):
+        value_list = list()
+        key_list = list()
+        for index_path in sorted(Path(result_path).rglob("*")):
+            with open(index_path, 'rb') as f:
+                x = pickle.load(f)
+                for key_outer, value_outer in x.items():
+                    # NO INNER DICT
+                    if isinstance(value_outer, pd.DataFrame):
+                        if key_outer in all_dict:
+                            all_dict[key_outer] = pd.concat([all_dict[key_outer], value_outer]).sort_index()
+                        else:
+                            all_dict[key_outer] = value_outer.sort_index()
+                    # Inner dict
+                    else:
+                        for key_inner, value_inner in value_outer.items():
+                            name = f"{key_outer}_{key_inner}"
+                            if name in all_dict:
+                                all_dict[name] = pd.concat([all_dict[name], value_inner]).sort_index()
+                            else:
+                                all_dict[name] = value_inner.sort_index()
+        value_list = [values for values in all_dict.values()]
+        key_list = [keys for keys in all_dict.keys()]
+        df_result = pd.concat(value_list, keys = key_list, axis = 1, names=["CF", "type", "component"])
+        return df_result
+    @staticmethod
+    def read_result_dict(result_path):
+        all_dict = {}
+        for index_path in sorted(Path(result_path).rglob("*")):
             with open(index_path, 'rb') as f:
                 x = pickle.load(f)
                 for key_outer, value_outer in x.items():
@@ -254,6 +282,29 @@ class FCeV:
                                 all_dict[key_outer][key_inner] = pd.concat([all_dict[key_outer][key_inner], value_inner]).sort_index()
                             else:
                                 all_dict[key_outer][key_inner] = value_inner.sort_index()
+        return all_dict
+    @staticmethod
+    def read_result_list(result_path):
+        all_dict = {}
+        for index_path in sorted(Path(result_path).rglob("*")):
+            with open(index_path, 'rb') as f:
+                x = pickle.load(f)
+                for key_outer, value_outer in x.items():
+                    # NO INNER DICT
+                    if isinstance(value_outer, pd.DataFrame):
+                        if key_outer not in all_dict:
+                            all_dict[key_outer] = list()
+                        all_dict[key_outer].append(value_outer)
+                    # Inner dict
+                    else:
+                        
+                        if key_outer not in all_dict:    
+                            all_dict[key_outer] = {}
+                        for key_inner, value_inner in value_outer.items():
+                            if isinstance(value_inner, pd.DataFrame):
+                                if key_inner not in all_dict[key_outer]:
+                                    all_dict[key_outer][key_inner] = list()
+                                all_dict[key_outer][key_inner].append(value_inner)
         return all_dict
     def get_binary_perform(self, metrics, min_limit, max_limit, config_events=None):
         df = self.get_binary_results(metrics, min_limit, max_limit, config_events)
