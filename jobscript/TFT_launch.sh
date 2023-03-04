@@ -4,6 +4,12 @@
 #$ -l mem512
 #$ -j y
 #$ -cwd
+#$ -M carlos.cano@manchester.ac.uk
+#$ -m ase
+#      b     Mail is sent at the beginning of the job.
+#      e     Mail is sent at the end of the job.
+#      a     Mail is sent when the job is aborted or rescheduled.
+#      s     Mail is sent when the job is suspended.
 module load apps/binapps/anaconda3/2021.11
 conda activate neuralprophet
 export OMP_NUM_THREADS=1
