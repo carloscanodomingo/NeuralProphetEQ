@@ -358,7 +358,7 @@ def configure(
             queue.close()
             del queue
             cov_result = (
-                    current_fcev.get_metrics_from_fc(df_fore["BASE"]["current"], df_fore["BASE"]["pred"], METRICS.RMSE)
+                    current_fcev.get_metrics_from_fc(df_fore["BASE"]["current"], df_fore["BASE"]["pred"], METRICS.CoV)
                     .mean()
                     .mean()
             )
