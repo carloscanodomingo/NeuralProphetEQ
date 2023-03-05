@@ -253,7 +253,7 @@ class DartsFCeV:
         series_ts = self.df_to_ts(df_events)
 
         # Takes events up to that point
-        train_base, val_base, series_base, scaler_base = self.preprocess_series(
+        train_base, val_base, self.series_base, scaler_base = self.preprocess_series(
             self.input_series, start_datetime, end_datetime, start_forecast_time
         )
         if self.covariates is not None:
@@ -276,13 +276,14 @@ class DartsFCeV:
                 scaler_events,
         ) = self.preprocess_series(self.events, start_datetime, end_datetime, start_forecast_time)
         # Todo Improve val 
-        training_val = series_base[-(len(val_base) + self.n_lags):]
+        training_val = self.series_base[-(len(val_base) + self.n_lags):]
 
 
         self.fit(train_base,training_val, series_covariate,  series_events )
         # Compute just one long forecast
-        df_forecast = self.test(val_base, series_covariate, series_events,scaler_events)
-        return df_forecast   
+        dict_out = self.test(val_base, series_covariate, series_events,scaler_base, scaler_events)
+        
+        return dict_out   
     def save_df(self, filename):
         path = Path(filename + ".csv")
         for index in range(100):
@@ -473,16 +474,16 @@ class DartsFCeV:
             raise ValueError("ModelNotImplemented")
         return model
 
-    def test(self, val_series, val_covariate,  val_events, scaler_events):
+    def test(self, val_series, val_covariate,  val_events, scaler_base, scaler_events):
         forecast_result = {}
         forecast_uncer = {}
-        df_forecast = self.one_step_test( val_series,val_covariate, val_events)
+        df_forecast = self.one_step_test( val_series,val_covariate, val_events, scaler_base, scaler_events)
 
         forecast_result["BASE"] = df_forecast
         df = val_events.pd_dataframe() 
         df[:] = 0.0
         val_evnts_empty= darts.TimeSeries.from_dataframe(df)
-        df_forecast = self.one_step_test( val_series,val_covariate, val_evnts_empty)
+        df_forecast = self.one_step_test( val_series,val_covariate, val_evnts_empty, scaler_base, scaler_events)
         forecast_result["EMPTY"] = df_forecast
         # forecast_uncer["BASE"] = df_uncer
         if self.synthetic_events is None:
@@ -496,7 +497,7 @@ class DartsFCeV:
             for offset, df_offset in list_dicts:
                 ts_syhtn = self.compose_synth(df_offset, val_series, val_events, scaler_events)
                 ts_syhtn = ts_syhtn.astype("float32")
-                df_forecast = self.one_step_test( val_series, val_covariate, ts_syhtn)
+                df_forecast = self.one_step_test( val_series, val_covariate, ts_syhtn, scaler_base, scaler_events)
                 offset_forecast[f"{offset}"] = df_forecast
                 # offset_uncertainty[f"{offset}"] = df_uncertainty
             forecast_result[f"{synth_key}"] = offset_forecast
@@ -516,7 +517,7 @@ class DartsFCeV:
             ts_syhtn = scaler_events.transform(ts_syhtn)
             ts_syhtn = val_events.drop_after(ts_syhtn.start_time()).append(ts_syhtn)
         return ts_syhtn
-    def one_step_test(self,  base, covariate,events):
+    def one_step_test(self,  base, covariate,events, scaler_base, scaler_events):
         if self.Darts_FCeV_config.probabilistic:
             n_samples = 1000
         else:
@@ -527,9 +528,12 @@ class DartsFCeV:
             covariates_with_events = covariate.concatenate(events, axis = 1)
         if self.Darts_FCeV_config.DartsModelConfig.covariate_type == "Future":
             forecast = self.model.predict(self.n_forecasts, future_covariates = covariates_with_events, verbose = False,num_samples=n_samples)
+            forecast = scaler_base.inverse_transform(forecast)
         else: 
             forecast = self.model.predict(self.n_forecasts, past_covariates = covariates_with_events, verbose = False,num_samples=n_samples)
+            forecast = scaler_base.inverse_transform(forecast)
         results = base.slice_intersect(forecast)
+        results = scaler_base.inverse_transform(results)
         if self.Darts_FCeV_config.probabilistic:
             df_forecast = pd.concat([results.pd_dataframe(), forecast.mean().pd_dataframe(), forecast.std().pd_dataframe()], keys= ["current", "pred", "uncer"], axis = 1)
         else:

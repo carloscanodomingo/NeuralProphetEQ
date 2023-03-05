@@ -17,9 +17,11 @@ import pickle
 from IPython.display import display
 from IPython.core.display import HTML
 import json
-
+from fastcore import foundation
+from fastai import tabular
+import fastai
 from plotnine import ggplot, aes, facet_grid, labs, geom_line,geom_point, theme, geom_ribbon,theme_minimal,scale_color_brewer
-
+import torch 
 from DartsFCeV import DartsFCeV, DartsFCeVConfig
 
 
@@ -229,14 +231,72 @@ class FCeV:
             + scale_color_brewer(type="qual", palette="Set1")
                 )
         return plot
-    def predict_from_metrics(current, pred, uncertainty, METRICS, synth):
-        ...
+    
+    @staticmethod
+    def predict_with_tabai(df_tab,df_test, dropout):
+        
+        y_name = "current"
+        min_y = np.min(df_tab[y_name]) - 1
+        df_tab[y_name] = np.log(df_tab[y_name] - min_y)
+        len_train = int(len(df_tab) * 0.8)
+        df_train = df_tab.iloc[:len_train];
+        df_val = df_tab.iloc[len_train + 1:];
+        splits = (foundation.L(range(len(df_train))), foundation.L(range(len(df_train) + 1, len(df_train) + len(df_val))))
+        to = fastai.tabular.core.TabularPandas(df_tab, procs=[tabular.core.FillMissing, tabular.core.Normalize],
+                       cont_names = list(df_tab.drop(y_name, axis = 1).columns.values),
+                       y_block=fastai.data.block.RegressionBlock(),
+                       y_names=y_name,
+                       splits=splits)
+        dls = to.dataloaders(bs=200)
+        max_log_y = np.max(df_tab[y_name])*1.2
+        y_range = torch.tensor([0, max_log_y]); y_range
+        tc = tabular.model.tabular_config(ps=[0.1, 0.01], embed_p=dropout, y_range=y_range)
+        learn = tabular.learner.tabular_learner(dls, layers=[100,500],
+                                metrics=fastai.metrics.exp_rmspe,
+                                config=tc,
+                                loss_func=fastai.losses.MSELossFlat())
+        learn.recorder.silent = True
+        with learn.no_bar(), learn.no_logging():
+            lr = learn.lr_find(show_plot=False)
+            learn.fit_one_cycle(100, lr)
+
+        dl = learn.dls.test_dl(df_test)
+        raw_test_preds = learn.get_preds(dl=dl)
+        learn.validate(dl=dl)
+        test_preds = (np.exp(raw_test_preds[0])+ min_y).numpy().T[0]
+        df_test["pred_ai"] = test_preds
+        return df_test
+
+    @staticmethod
+    def predict_from_metrics(df, df_events, metric, input_length, synth):
+        df_results = pd.DataFrame()
+        for index in range(len(df) // input_length):
+            df_test = df.iloc[index * input_length: (index + 1) * input_length - 1]
+            list_values = list()
+            list_index = list()
+            list_colums = list()
+            start_index = df_test.index.mean().round(freq='s')
+            expected = df_events.loc[df_test.index]
+            for name, group in df_test.drop(["BASE", "EMPTY"], axis = 1).groupby(level='CF', axis = 1):
+                pred = group[name]["pred"]
+                current = group[name]["current"]
+                uncer = group[name]["uncer"]
+                value = 0 # np.random.normal(0, 1, 4)
+                simulation = pred + value * uncer
+                curret_metrics = FCeV.get_metrics_from_fc(current, simulation, metric).mean(1).mean()
+                list_values.append(pd.DataFrame(curret_metrics, columns = synth.loc[name].values, index = [start_index]))
+            #list_values.append(pd.DataFrame(expected.mean().values, columns = ["expected"], index = [start_index]))
+            df_out = pd.concat(list_values, axis = 1)
+            df_out["pred"] = df_out.idxmin(1).values[0]
+            df_out["current"] = expected.mean().values[0]
+            df_results = pd.concat([df_results, df_out])
+        return df_results
     @staticmethod
     def read_result(result_path):
         all_dict = {}
         value_list = list()
         key_list = list()
-        for index_path in sorted(Path(result_path).rglob("*")):
+        for index_path in sorted(Path(result_path).rglob("*.pkl")):
             with open(index_path, 'rb') as f:
                 x = pickle.load(f)
                 for key_outer, value_outer in x.items():
