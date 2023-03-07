@@ -20,7 +20,6 @@ from darts.dataprocessing import transformers
 
 from darts.models import TCNModel, TFTModel, RNNModel, NBEATSModel, NHiTSModel, TransformerModel, NLinearModel
 
-# from FCeV import FCeVConfig
 covariate_types = {"Future", "Past"}
 class DartModelMetaClass(type):
     """ Metaclass to force Model class to contains specific attributes """
@@ -165,8 +164,33 @@ class DartsFCeV:
 
         #Create the Darts model
         self.model = self.create_dart_model()
-
-
+        
+        
+    def get_df_input(self):
+        return self.input_series.pd_dataframe()
+    def get_df_covariates(self):
+        if self.covariates is None:
+            df_covariates = None
+        else:
+            df_covariates = self.covariates.pd_dataframe()
+        return df_covariates
+    def get_events(self):
+        return self.df_events
+    def get_synthetics(self):
+        return self.synthetic_events
+    """
+    def get_results_data(self):
+        df_input = self.input_series.pd_dataframe()
+        fceV_results_data = {
+            "df_input": df_input,
+            "df_covariate": df_covariates,
+            "df_events": self.df_events,
+            "df_synthetics":  synthetic_events, 
+            
+            fcev_config=  self.fcev_config,
+        }
+        return fceV_results_data
+    """
     def df_to_ts(self, df):
         """ Function to convert a pandas dataframe to a Darts timeseries
     
@@ -226,8 +250,7 @@ class DartsFCeV:
                 for idx_offset in event_offset:
                     current_event = pd.DataFrame(0.0, index=np.arange(self.n_forecasts), columns = synthetic_events.columns)
                     current_event.iloc[idx_offset] = synthetic_event
-                    current_dict[f"{idx_offset}"] = current_event
-                all_dict[f"SYNTH_{idx}"] = current_dict
+                    all_dict[f"{idx}_{idx_offset}"] = current_event
         elif self.config_synthetic == "constant":
             for idx, synthetic_event in synthetic_events.iterrows():
                 all_dict[f"{idx}"] = pd.concat([pd.DataFrame(synthetic_event).T]*self.n_forecasts, ignore_index = True)
@@ -478,32 +501,28 @@ class DartsFCeV:
         forecast_result = {}
         forecast_uncer = {}
         df_forecast = self.one_step_test( val_series,val_covariate, val_events, scaler_base, scaler_events)
-
-        forecast_result["BASE"] = df_forecast
-        df = val_events.pd_dataframe() 
-        df[:] = 0.0
-        val_evnts_empty= darts.TimeSeries.from_dataframe(df)
-        df_forecast = self.one_step_test( val_series,val_covariate, val_evnts_empty, scaler_base, scaler_events)
-        forecast_result["EMPTY"] = df_forecast
+        list_names = list()
+        list_results = list()
+        #forecast_result["current"] = 
+        df_val = pd.concat([scaler_base.inverse_transform(val_series).pd_dataframe()], axis=1, keys=['current'])
+        list_results.append(df_val)
+        list_names.append("current")
+        #forecast_result["BASE"] = df_forecast
+        list_results.append(df_forecast)
+        list_names.append("BASE")
+        
         # forecast_uncer["BASE"] = df_uncer
         if self.synthetic_events is None:
-            return forecast_result, forecast_uncer
+            return pd.concat(list_results, axis = 1, keys = list_names)
         for synth_key, synth_dict in self.synthetic_events.items():
-            offset_forecast = {}
-            if isinstance(synth_dict, pd.DataFrame):
-                list_dicts = [(synth_key, synth_dict)]
-            else:
-                list_dicts = synth_dict.items()
-            for offset, df_offset in list_dicts:
-                ts_syhtn = self.compose_synth(df_offset, val_series, val_events, scaler_events)
-                ts_syhtn = ts_syhtn.astype("float32")
-                df_forecast = self.one_step_test( val_series, val_covariate, ts_syhtn, scaler_base, scaler_events)
-                offset_forecast[f"{offset}"] = df_forecast
-                # offset_uncertainty[f"{offset}"] = df_uncertainty
-            forecast_result[f"{synth_key}"] = offset_forecast
-            # forecast_uncer[f"{synth_key}"] = offset_uncertainty
-
-        return forecast_result
+            ts_syhtn = self.compose_synth(synth_dict, val_series, val_events, scaler_events)
+            ts_syhtn = ts_syhtn.astype("float32")
+            df_forecast = self.one_step_test( val_series, val_covariate, ts_syhtn, scaler_base, scaler_events)
+            list_results.append(df_forecast)
+            list_names.append(str(synth_key))
+        return pd.concat(list_results, axis = 1, keys = list_names)
+    
+    
     def compose_synth(self, df_synth, val_series, val_events, scaler_events):
         df_synth = df_synth.set_index(val_series.time_index)
         ts_syhtn = self.df_to_ts(df_synth)
@@ -517,9 +536,11 @@ class DartsFCeV:
             ts_syhtn = scaler_events.transform(ts_syhtn)
             ts_syhtn = val_events.drop_after(ts_syhtn.start_time()).append(ts_syhtn)
         return ts_syhtn
+    
+    
     def one_step_test(self,  base, covariate,events, scaler_base, scaler_events):
         if self.Darts_FCeV_config.probabilistic:
-            n_samples = 1000
+            n_samples = 100
         else:
             n_samples = 1
         if covariate is None:
@@ -534,10 +555,17 @@ class DartsFCeV:
             forecast = scaler_base.inverse_transform(forecast)
         results = base.slice_intersect(forecast)
         results = scaler_base.inverse_transform(results)
-        if self.Darts_FCeV_config.probabilistic:
-            df_forecast = pd.concat([results.pd_dataframe(), forecast.mean().pd_dataframe(), forecast.std().pd_dataframe()], keys= ["current", "pred", "uncer"], axis = 1)
+        df_forecast = forecast.pd_dataframe()
+        df_forecast.columns = df_forecast.columns.str.split("_", expand=True)
+        if df_forecast.columns.nlevels == 1:
+            df_forecast = pd.concat([df_forecast], axis=1, keys=['s0'])
         else:
-            df_forecast = pd.concat([results.pd_dataframe(), forecast.mean().pd_dataframe()], keys= ["current", "pred"], axis = 1)
+            df_forecast = df_forecast.swaplevel(axis=1)
+
+        #if self.Darts_FCeV_config.probabilistic:
+        #    df_forecast = pd.concat([results.pd_dataframe(), forecast.mean().pd_dataframe(), forecast.std().pd_dataframe()], keys= ["current", "pred", "uncer"], axis = 1)
+        #else:
+        #    df_forecast = pd.concat([results.pd_dataframe(), forecast.mean().pd_dataframe()], keys= ["current", "pred"], axis = 1)
         return df_forecast
 
     # Predict for differents hours offset and differents event offset

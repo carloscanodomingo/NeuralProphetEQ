@@ -45,6 +45,7 @@ from DartsFCeV import NLinearDartsFCeVConfig,TransformerDartsFCeVConfig, DartsFC
 @click.option("--verbose", type=bool, required=False)
 @click.option("--epochs", type=int, required=True)
 @click.option("--historic_lenght", type=int, required=True)
+@click.option("--forecast_lenght_hours", type=int, required=True)
 @click.option("--training_lenght_days", type=int, required=True)
 @click.option("--dropout", type=float, required=True)
 @click.option("--batch_size", type=int, required=True)
@@ -127,6 +128,7 @@ def configure(
     verbose,
     epochs,
     historic_lenght,
+    forecast_lenght_hours,
     training_lenght_days,
     dropout,
     batch_size,
@@ -189,8 +191,8 @@ def configure(
         df_signal = df_GNSSTEC
         df_covariates = df_covariate
         
-        forecast_length = timedelta(hours=24)
-        question_mark_length = timedelta(hours=24)
+        forecast_length = timedelta(hours=forecast_lenght_hours)
+        question_mark_length = timedelta(hours=forecast_lenght_hours)
         # Time to take into account to predict
         historic_lenght = timedelta(days=historic_lenght)
         training_lenght = timedelta(days=training_lenght_days)
@@ -358,9 +360,7 @@ def configure(
             queue.close()
             del queue
             cov_result = (
-                    current_fcev.get_metrics_from_fc(df_fore["BASE"]["current"], df_fore["BASE"]["pred"], METRICS.CoV)
-                    .mean()
-                    .mean()
+                    current_fcev.get_metrics_from_fc(df_fore["current"], df_fore["BASE"], METRICS.CoV)
             )
             sys.stdout = sys.__stdout__
             sys.stderr = sys.__stderr__
@@ -393,9 +393,7 @@ def process_fold_with_timeout(fcev_instance, current_index, queue):
         df_fore = fcev_instance.process_fold(current_index)
     except:
         queue.put(None)
-    print(f"before queue put")
     queue.put(df_fore)
-    print(f"after queue put")
     return 0
 
 def signal_handler(sig, frame):

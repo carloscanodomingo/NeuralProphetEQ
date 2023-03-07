@@ -17,20 +17,19 @@ import pickle
 from IPython.display import display
 from IPython.core.display import HTML
 import json
-from fastcore import foundation
-from fastai import tabular
-import fastai
-from plotnine import ggplot, aes, facet_grid, labs, geom_line,geom_point, theme, geom_ribbon,theme_minimal,scale_color_brewer
-import torch 
 from DartsFCeV import DartsFCeV, DartsFCeVConfig
-
-
+import lzma
 
 class METRICS(Enum):
     CoV = (0,)
     mape = (1,)
     marre = (2,)
     RMSE = (3,)
+    ZSCORE = (4,)
+    CosSim = (5,)
+    PRESS = (6,)
+    RMSE_sigma = (7,)
+    DTW = (8, )
 
 
 
@@ -46,7 +45,13 @@ class FCeVConfig:
     def __post_init__(self):
         self.forecast_length = pd.Timedelta(self.forecast_length)
         self.question_mark_length = pd.Timedelta(self.question_mark_length)
-
+@dataclass
+class FCeVResultsData:
+    df_input: pd.DataFrame
+    df_covariate:pd.DataFrame
+    df_events: pd.DataFrame
+    df_synthetics:pd.DataFrame
+    fcev_config: FCeVConfig
 
 class FCeV_type(Enum):
     NeuralProphet = 0
@@ -109,6 +114,29 @@ class FCeV:
         self.index_dates = df_input.reset_index()["ds"]
 
 
+    def get_results_data(self):
+        return {"df_input": self.FCeV_model.get_df_input(),
+                "df_covariates":  self.FCeV_model.get_df_covariates(),
+                 "df_events":  self.FCeV_model.get_events(),
+                "df_synthetics":             self.FCeV_model.get_synthetics(),
+                "forecast_length":               self.FCeV_config.forecast_length,
+                "input_length":               self.FCeV_config.input_length,
+                "training_length": self.FCeV_config.training_length,
+                "freq": self.FCeV_config.freq, 
+                "n_forecast": self.FCeV_model.n_forecasts,
+               }
+
+    def save_results(self, df_fore):
+        file_name_config = f"{self.output_path}{type(self.FCeV_model).__name__}_config.cpkl"
+        config_path = Path(file_name_config)
+        if not config_path.is_file():
+            with open(config_path, 'wb') as f:
+                pickle.dump(self.get_results_data(), f)
+        file_name_df_fore = df_fore["BASE"].index[0].strftime("%Y_%m_%d_%H_%M_%S")
+        with open(f"{self.output_path}df_forecast_{file_name_df_fore}.pkl", 'wb') as f:
+            pickle.dump(df_fore, f)
+
+
     def create_folds(self, date_start, n_iteration):
         """Function to split all data into folds
 
@@ -168,7 +196,6 @@ class FCeV:
     def create_iteration(self, date_start, n_iteration):
         self.iterations = pd.DataFrame(columns=["start_date", "end_date"])
         len_iteration = self.FCeV_config.forecast_length
-        print(f"{self.duration} __ {self.FCeV_config.forecast_length}")
         max_number_iteration = int((self.end_date- date_start- self.FCeV_config.forecast_length) // len_iteration)
         if n_iteration is None:
             n_iteration = max_number_iteration
@@ -189,135 +216,30 @@ class FCeV:
         mean_pred_values = df_forecast["current"].mean().mean()
         return df_forecast.mean() / mean_pred_values
     @staticmethod
-    def get_metrics_from_fc(current, pred, metrics):
+    def get_metrics_from_fc(df_current, df_pred, metrics):
+        current = df_current.droplevel(0, 1)
         if metrics is METRICS.CoV:
-            return (
-                current
-                .sub(pred)
-                .pow(2)
-                .pow(1 / 2) / pred
-            ) * 100
-        elif metrics is METRICS.RMSE:
-            return (
-            current
-            .sub(pred)
-            .pow(2)
-            .pow(1 / 2) 
-        ) * 100
+            mean_of_cov = 0
+            
+            for idx, group in df_pred.groupby(level=0, axis = 1):
+                mean_of_cov = mean_of_cov + group.droplevel(0, 1).sub(current).pow(2).mean().pow(1/2).div(current.mean(0)).mean()
+            print(mean_of_cov)
+            mean_of_cov = mean_of_cov /  len(df_pred.groupby(level=0, axis = 1))
+            return (100 * mean_of_cov)
+        
+        
+        if metrics is METRICS.RMSE:
+            mean_of_rmse = 0
+            for idx, group in df_pred.groupby(level=0, axis = 1):
+                mean_of_rmse = mean_of_rmse + group.droplevel(0, 1).sub(current).pow(2).mean().pow(1/2).mean()
+            mean_of_rmse = mean_of_rmse /  len(df_pred.groupby(level=0, axis = 1))
+            return (mean_of_rmse)
         else:
             raise ValueError("Not Implemented Yet")
-  
-    def save_results(self, df_forecast):
-        file_name = df_forecast["BASE"].index[0].strftime("%Y_%m_%d_%H_%M_%S")
-        with open(f"{self.output_path}df_forecast_{file_name}.pkl", 'wb') as f:
-            pickle.dump(df_forecast, f)
-    @staticmethod
-    def plot_results(df_forecast):
-        current_forecast = df_forecast.stack(level=1).reset_index(1)
-        if "uncer" in current_forecast.columns:
-            current_forecast["uncer_min"] = current_forecast['pred'] - current_forecast['uncer']
-            current_forecast["uncer_max"] = current_forecast['pred'] + current_forecast['uncer']
-        else:
-            current_forecast["uncer_min"] = current_forecast['pred']
-            current_forecast["uncer_max"] = current_forecast['pred']
-        
-        plot = (ggplot(current_forecast.reset_index()) +  # What data to use
-             aes(x="ds")  # What variable to use
-            + geom_ribbon(aes(y = "pred", ymin = "uncer_min", ymax = "uncer_max", fill = "component"), alpha = .4) 
-            + geom_line(aes(y="current", color = "component"),size = 1.5)  # Geometric object to use for drawing
-            + geom_line(aes(y="pred", color = "component"),linetype="dashed",size = 1.5 )  # Geometric object to use for drawing
-            + theme_minimal() 
-            +theme(legend_position="bottom", figure_size=(10, 6))
-            + scale_color_brewer(type="qual", palette="Set1")
-                )
-        return plot
+            
+
     
-    @staticmethod
-    def predict_with_tabai(df_tab,df_test, dropout):
-        
-        y_name = "current"
-        min_y = np.min(df_tab[y_name]) - 1
-        df_tab[y_name] = np.log(df_tab[y_name] - min_y)
-        len_train = int(len(df_tab) * 0.8)
-        df_train = df_tab.iloc[:len_train];
-        df_val = df_tab.iloc[len_train + 1:];
-        splits = (foundation.L(range(len(df_train))), foundation.L(range(len(df_train) + 1, len(df_train) + len(df_val))))
-        to = fastai.tabular.core.TabularPandas(df_tab, procs=[tabular.core.FillMissing, tabular.core.Normalize],
-                       cont_names = list(df_tab.drop(y_name, axis = 1).columns.values),
-                       y_block=fastai.data.block.RegressionBlock(),
-                       y_names=y_name,
-                       splits=splits)
-        dls = to.dataloaders(bs=200)
-        max_log_y = np.max(df_tab[y_name])*1.2
-        y_range = torch.tensor([0, max_log_y]); y_range
-        tc = tabular.model.tabular_config(ps=[0.1, 0.01], embed_p=dropout, y_range=y_range)
-        learn = tabular.learner.tabular_learner(dls, layers=[100,500],
-                                metrics=fastai.metrics.exp_rmspe,
-                                config=tc,
-                                loss_func=fastai.losses.MSELossFlat())
-        learn.recorder.silent = True
-        with learn.no_bar(), learn.no_logging():
-            lr = learn.lr_find(show_plot=False)
-            learn.fit_one_cycle(100, lr)
 
-        dl = learn.dls.test_dl(df_test)
-        raw_test_preds = learn.get_preds(dl=dl)
-        learn.validate(dl=dl)
-        test_preds = (np.exp(raw_test_preds[0])+ min_y).numpy().T[0]
-        df_test["pred_ai"] = test_preds
-        return df_test
-
-    @staticmethod
-    def predict_from_metrics(df, df_events, metric, input_length, synth):
-        df_results = pd.DataFrame()
-        for index in range(len(df) // input_length):
-            df_test = df.iloc[index * input_length: (index + 1) * input_length - 1]
-            list_values = list()
-            list_index = list()
-            list_colums = list()
-            start_index = df_test.index.mean().round(freq='s')
-            expected = df_events.loc[df_test.index]
-            for name, group in df_test.drop(["BASE", "EMPTY"], axis = 1).groupby(level='CF', axis = 1):
-                pred = group[name]["pred"]
-                current = group[name]["current"]
-                uncer = group[name]["uncer"]
-                value = 0 # np.random.normal(0, 1, 4)
-                simulation = pred + value * uncer
-                curret_metrics = FCeV.get_metrics_from_fc(current, simulation, metric).mean(1).mean()
-                list_values.append(pd.DataFrame(curret_metrics, columns = synth.loc[name].values, index = [start_index]))
-            #list_values.append(pd.DataFrame(expected.mean().values, columns = ["expected"], index = [start_index]))
-            df_out = pd.concat(list_values, axis = 1)
-            df_out["pred"] = df_out.idxmin(1).values[0]
-            df_out["current"] = expected.mean().values[0]
-            df_results = pd.concat([df_results, df_out])
-        return df_results
-    @staticmethod
-    def read_result(result_path):
-        all_dict = {}
-        value_list = list()
-        key_list = list()
-        for index_path in sorted(Path(result_path).rglob("*.pkl")):
-            with open(index_path, 'rb') as f:
-                x = pickle.load(f)
-                for key_outer, value_outer in x.items():
-                    # NO INNER DICT
-                    if isinstance(value_outer, pd.DataFrame):
-                        if key_outer in all_dict:
-                            all_dict[key_outer] = pd.concat([all_dict[key_outer], value_outer]).sort_index()
-                        else:
-                            all_dict[key_outer] = value_outer.sort_index()
-                    # Inner dict
-                    else:
-                        for key_inner, value_inner in value_outer.items():
-                            name = f"{key_outer}_{key_inner}"
-                            if name in all_dict:
-                                all_dict[name] = pd.concat([all_dict[name], value_inner]).sort_index()
-                            else:
-                                all_dict[name] = value_inner.sort_index()
-        value_list = [values for values in all_dict.values()]
-        key_list = [keys for keys in all_dict.keys()]
-        df_result = pd.concat(value_list, keys = key_list, axis = 1, names=["CF", "type", "component"])
-        return df_result
     @staticmethod
     def read_result_dict(result_path):
         all_dict = {}
