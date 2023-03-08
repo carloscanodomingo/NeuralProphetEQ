@@ -28,9 +28,51 @@ class SUMMARY_METRICS(Enum):
     RMSE_sigma = (7,)
     DTW = (8, )
     ZDENS = (9, )
-
     
-def get_summary(current, pred, metrics, uncer = pd.DataFrame()):
+    
+    
+def get_summary(current, pred, metrics):
+        if metrics is SUMMARY_METRICS.CoV:
+            return (
+                (current
+                .sub(pred)
+                .pow(2)
+                .pow(1 / 2) / current).mean()
+            ) * 100
+        elif metrics is SUMMARY_METRICS.RMSE:
+            return np.mean(np.power(np.mean(np.power(np.subtract(pred,current),2),0),1/2))
+        elif metrics is SUMMARY_METRICS.PRESS:
+            return np.mean(np.sum(np.pow(np.subtract(pred,current), 2),0))
+        elif metrics is SUMMARY_METRICS.RMSE_sigma:
+            return (
+            current
+            .sub(pred)
+            .pow(2).add(2 * uncer.pow(2)).pow(1/2).mean()
+        )
+        elif metrics is SUMMARY_METRICS.DTW:
+            return current.combine(pred, lambda x, y: np.repeat(dtaidistance.dtw.distance_fast(x.values.astype("double"),y.values.astype("double")), len(x))).mean().mean()
+        elif metrics is SUMMARY_METRICS.ZDENS:
+            if uncer.empty:
+                raise ValueError("For compute Z score the uncertainty has to be included")
+            return pd.DataFrame(scipy.stats.norm(pred,uncer ).pdf(current), columns = uncer.columns, index = uncer.index).mean().mean()
+        elif metrics is SUMMARY_METRICS.ZSCORE:
+            if uncer.empty:
+                raise ValueError("For compute Z score the uncertainty has to be included")
+            return pd.DataFrame(scipy.stats.norm().pdf(current.sub(pred).div(uncer)), columns = uncer.columns, index = uncer.index)
+        elif metrics is SUMMARY_METRICS.CosSim:
+            if uncer.empty:
+                raise ValueError("For compute Z score the uncertainty has to be included")
+            total_sim = 10
+            value = 0
+
+            for i in range(total_sim):
+                value = value + np.diag(cosine_similarity(pred.T, current.T.add(np.random.normal(1) * uncer.T))).mean()
+            return 1 - (value / total_sim)
+        else:
+            raise ValueError("Not Implemented Yet")
+            
+    
+def get_summary2(current, pred, metrics, uncer = pd.DataFrame()):
         if metrics is SUMMARY_METRICS.CoV:
             return (
                 (current
@@ -135,6 +177,9 @@ def predict_with_tabai(df_tab, df_test, dropout, layers):
         return df_test
     
 def predict_from_metrics(df, df_events, metric, input_length, synth):
+        selected_elements = [True if element in str(list(synth.index)) else False for element in df.columns.levels[0]]
+        remove_columns = df.columns.levels[0][np.logical_not(selected_elements)].drop("current")
+        df_test = df.drop(remove_columns, axis = 1, level = 0).head()
         df_results = pd.DataFrame()
         for index in range(len(df) // input_length):
             df_test = df.iloc[index * input_length: (index + 1) * input_length - 1]
@@ -185,25 +230,44 @@ def read_result(result_path):
                 FCeV_results_data = pickle.load(f)
         else:
             print(f"No config files: {len(result_config)}")
+        list_pandas = list()
         for index_path in sorted(Path(result_path).rglob("*.pkl")):
             with open(index_path, 'rb') as f:
                 x = pickle.load(f)
-                for key_outer, value_outer in x.items():
-                    # NO INNER DICT
-                    if isinstance(value_outer, pd.DataFrame):
-                        if key_outer in all_dict:
-                            all_dict[key_outer] = pd.concat([all_dict[key_outer], value_outer]).sort_index()
-                        else:
-                            all_dict[key_outer] = value_outer.sort_index()
-                    # Inner dict
-                    else:
-                        for key_inner, value_inner in value_outer.items():
-                            name = f"{key_outer}_{key_inner}"
-                            if name in all_dict:
-                                all_dict[name] = pd.concat([all_dict[name], value_inner]).sort_index()
-                            else:
-                                all_dict[name] = value_inner.sort_index()
-        value_list = [values for values in all_dict.values()]
-        key_list = [keys for keys in all_dict.keys()]
-        df_result = pd.concat(value_list, keys = key_list, axis = 1, names=["CF", "type", "component"])
+                list_pandas.append(x)
+        df_result = pd.concat(list_pandas, names=["CF", "type", "component"])
         return df_result, FCeV_results_data
+    
+def read_result2(result_path):
+    all_dict = {}
+    value_list = list()
+    key_list = list()
+    result_config = list(Path(result_path).rglob("*config.cpkl"))
+    FCeV_results_data = None
+    if len(result_config) == 1:
+        with open(result_config[0], 'rb') as f:
+            FCeV_results_data = pickle.load(f)
+    else:
+        print(f"No config files: {len(result_config)}")
+    for index_path in sorted(Path(result_path).rglob("*.pkl")):
+        with open(index_path, 'rb') as f:
+            x = pickle.load(f)
+            for key_outer, value_outer in x.items():
+                # NO INNER DICT
+                if isinstance(value_outer, pd.DataFrame):
+                    if key_outer in all_dict:
+                        all_dict[key_outer] = pd.concat([all_dict[key_outer], value_outer]).sort_index()
+                    else:
+                        all_dict[key_outer] = value_outer.sort_index()
+                # Inner dict
+                else:
+                    for key_inner, value_inner in value_outer.items():
+                        name = f"{key_outer}_{key_inner}"
+                        if name in all_dict:
+                            all_dict[name] = pd.concat([all_dict[name], value_inner]).sort_index()
+                        else:
+                            all_dict[name] = value_inner.sort_index()
+    value_list = [values for values in all_dict.values()]
+    key_list = [keys for keys in all_dict.keys()]
+    df_result = pd.concat(value_list, keys = key_list, axis = 1, names=["CF", "type", "component"])
+    return df_result, FCeV_results_data

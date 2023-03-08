@@ -27,6 +27,7 @@ MAX_TIMEOUT = 3600/ 3  # MAX TIME 20min
 MAX_VALUE ="Inf" 
 from FCeV import FCeV, FCeVConfig, METRICS
 import time
+import math
 # click_example.py
 
 from DartsFCeV import NLinearDartsFCeVConfig,TransformerDartsFCeVConfig, DartsFCeVConfig,NHITSDartsFCeVConfig, NBEATSDartsFCeVConfig,RNNDartsFCeVConfig,TCNDartsFCeVConfig, TFTDartsFCeVConfig
@@ -207,6 +208,7 @@ def configure(
             values = np.arange(0,16,3)
             synthetic_events = pd.DataFrame(values, columns= ["pr"])
             df_all = pd.DataFrame()
+            config_synthetic = "constant"
             for ix, eq in df_events.sort_values(by=["pr"]).iterrows():
                 event = pd.DataFrame(eq).T
                 start_time = event.index[0]
@@ -373,6 +375,8 @@ def configure(
             cov_result = (
                     current_fcev.get_metrics_from_fc(df_fore["current"], df_fore["BASE"], METRICS.CoV)
             )
+            if math.isnan(cov_results)~:
+                cov_results = MAX_VALUE
             sys.stdout = sys.__stdout__
             sys.stderr = sys.__stderr__
             print(str(cov_result) + "\n")

@@ -223,7 +223,6 @@ class FCeV:
             
             for idx, group in df_pred.groupby(level=0, axis = 1):
                 mean_of_cov = mean_of_cov + group.droplevel(0, 1).sub(current).pow(2).mean().pow(1/2).div(current.mean(0)).mean()
-            print(mean_of_cov)
             mean_of_cov = mean_of_cov /  len(df_pred.groupby(level=0, axis = 1))
             return (100 * mean_of_cov)
         
