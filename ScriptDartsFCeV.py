@@ -375,7 +375,7 @@ def configure(
             cov_result = (
                     current_fcev.get_metrics_from_fc(df_fore["current"], df_fore["BASE"], METRICS.CoV)
             )
-            if math.isnan(cov_results)~:
+            if math.isnan(cov_results):
                 cov_results = MAX_VALUE
             sys.stdout = sys.__stdout__
             sys.stderr = sys.__stderr__
