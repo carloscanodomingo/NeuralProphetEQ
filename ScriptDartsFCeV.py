@@ -9,7 +9,6 @@ import os
 warnings.filterwarnings("ignore")
 import logging
 from datetime import datetime, timedelta
-from func_timeout import func_set_timeout, FunctionTimedOut
 
 logging.disable(logging.CRITICAL)
 import pandas as pd
@@ -375,8 +374,8 @@ def configure(
             cov_result = (
                     current_fcev.get_metrics_from_fc(df_fore["current"], df_fore["BASE"], METRICS.CoV)
             )
-            if math.isnan(cov_results):
-                cov_results = MAX_VALUE
+            if math.isnan(cov_result):
+                cov_result = MAX_VALUE
             sys.stdout = sys.__stdout__
             sys.stderr = sys.__stderr__
             print(str(cov_result) + "\n")
