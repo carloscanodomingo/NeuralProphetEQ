@@ -76,9 +76,9 @@ from DartsFCeV import NLinearDartsFCeVConfig,TransformerDartsFCeVConfig, DartsFC
 @click.option(
         "--simulation_scenario",
         type = click.Choice(
-            ["TEC", "SALES", "TEC_constant"]
+            ["TEC", "SALES", "TEC_constant", "TEC_EQ"]
             ),
-        default = "TEC"
+        default = "TEC_EQ"
         )
 
 
@@ -173,14 +173,14 @@ def configure(
     if verbose == 0:
         sys.stdout = open(os.devnull, "w")
         sys.stderr = open(os.devnull, "w")
-    if  simulation_scenario == "TEC" or simulation_scenario == "TEC_constant":
+    if  simulation_scenario == "TEC" or simulation_scenario == "TEC_constant" or simulation_scenario == "TEC_EQ":
         ConfigEQ_d = {
-            "dist_start": 1000,
-            "dist_delta": 3000,
-            "mag_start": 4.5,
-            "mag_delta": 2,
-            "filter": True,
-            "drop": ["arc_cos", "arc_sin"],
+        "dist_start": 100,
+        "dist_delta": 6000,
+        "mag_start": 4.5,
+        "mag_delta": 2,
+        "filter": 1,
+        "drop": ["arc_cos", "arc_sin","depth", "mag", "dist"],
         }
         config_events = ConfigEQ(**ConfigEQ_d)
 
@@ -200,10 +200,21 @@ def configure(
         if epochs == 0:
             epochs = None
 
-        if simulation_scenario == "TEC":
+        if simulation_scenario == "TEC_EQ":
             synthetic_events = pd.read_pickle(data_path+"synthetic_raw.pkl")
             df_events = prepare_EQ(df_eq, config_events)
             df_synth = prepare_EQ(synthetic_events, config_events)
+            values = np.arange(0,16,3)
+            synthetic_events = pd.DataFrame(values, columns= ["pr"])
+            df_all = pd.DataFrame()
+            for ix, eq in df_events.sort_values(by=["pr"]).iterrows():
+                event = pd.DataFrame(eq).T
+                start_time = event.index[0]
+                end_time = start_time + forecast_length - freq
+                index = pd.date_range(start_time, end_time, freq = freq)
+                df = pd.DataFrame(np.repeat(event.values, len(index)), columns = df_events.columns, index=index)
+                df_all = df.combine_first(df_all)
+            
         elif simulation_scenario == "TEC_constant":
             df_synth = pd.DataFrame(np.arange(60, 85,1), columns= ["f107"])
             df_events = pd.DataFrame(df_covariate["f107"])
