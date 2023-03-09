@@ -205,7 +205,7 @@ def configure(
             df_events = prepare_EQ(df_eq, config_events)
             df_synth = prepare_EQ(synthetic_events, config_events)
             values = np.arange(0,16,3)
-            synthetic_events = pd.DataFrame(values, columns= ["pr"])
+            df_synth = pd.DataFrame(values, columns= ["pr"])
             df_all = pd.DataFrame()
             config_synthetic = "constant"
             for ix, eq in df_events.sort_values(by=["pr"]).iterrows():
