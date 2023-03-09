@@ -156,7 +156,7 @@ class DartsFCeV:
             self.synthetic_events = self.prepare_synthetic_events(synthetic_events)
 
         self.index_date = df_input.index
-        df_events = self.df_events.reindex(self.index_date).fillna(0.0)
+        self.df_events = self.df_events.reindex(self.index_date).fillna(0.0)
         
         self.events =  self.df_to_ts(df_events)
         

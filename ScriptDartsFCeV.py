@@ -215,6 +215,7 @@ def configure(
                 index = pd.date_range(start_time, end_time, freq = freq)
                 df = pd.DataFrame(np.repeat(event.values, len(index)), columns = df_events.columns, index=index)
                 df_all = df.combine_first(df_all)
+            df_events = df_all
             
         elif simulation_scenario == "TEC_constant":
             df_synth = pd.DataFrame(np.arange(60, 85,1), columns= ["f107"])
