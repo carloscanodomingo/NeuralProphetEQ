@@ -158,7 +158,7 @@ class DartsFCeV:
         self.index_date = df_input.index
         self.df_events = self.df_events.reindex(self.index_date).fillna(0.0)
         
-        self.events =  self.df_to_ts(df_events)
+        self.events =  self.df_to_ts( self.df_events )
         
         self.folds = pd.DataFrame(columns=["start_date", "end_date"])
 
@@ -240,7 +240,9 @@ class DartsFCeV:
         if synthetic_events is None:
             raise ValueError("Syntheticevents not valid")
         all_dict = {}
+        
         if self.config_synthetic == "single":
+            all_dict[f"0"] = pd.DataFrame(0.0, index=np.arange(self.n_forecasts), columns = synthetic_events.columns)
             for idx, synthetic_event in synthetic_events.iterrows():
                 event_offset = [
                     int(self.n_forecasts/ (periods + 1) * x)

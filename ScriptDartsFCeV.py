@@ -76,7 +76,7 @@ from DartsFCeV import NLinearDartsFCeVConfig,TransformerDartsFCeVConfig, DartsFC
 @click.option(
         "--simulation_scenario",
         type = click.Choice(
-            ["TEC", "SALES", "TEC_constant", "TEC_EQ", "trafic"]
+            ["TEC", "SALES", "TEC_constant", "TEC_EQ", "trafic", "irradiance"]
             ),
         default = "TEC_EQ"
         )
@@ -245,6 +245,21 @@ def configure(
         forecast_length = timedelta(hours=24 )
         question_mark_length = timedelta(hours=24)
         date_start = pd.Timestamp(2017, 1, 1)
+    elif simulation_scenario == "irradiance":
+        config_synthetic = "single"
+        date_start = pd.Timestamp(year= 2018, month=1, day = 1)
+        path = data_path + "irradiance/POWER_Point_Hourly_20160101_20210101_040d4006N_003d6990W_LST.csv"
+        df = pd.read_csv(path, parse_dates=["ds"]).set_index("ds").sort_index()
+        df_events = df[["precipitation"]]
+        df_events = df_events.loc[df_events["precipitation"] >0.5]
+        df_signal =  df[["Irradiance"]]
+        df_covariates = df.drop(["Irradiance", "precipitation"], axis = 1)
+        df_synth = pd.DataFrame(np.arange(0.5, 3.5, 0.5), columns = ["precipitation"])
+        freq = pd.Timedelta(hours=1)
+        historic_lenght =  timedelta(days=historic_lenght)
+        training_lenght = timedelta(days=training_lenght_days)
+        forecast_length = timedelta(hours=24 )
+        question_mark_length = timedelta(hours=24)
     elif simulation_scenario == "SALES":
         datapath_sales =  data_path + "kaggle/store-sales-time-series-forecasting/"
         df_train =  pd.read_csv(datapath_sales + "train.csv", parse_dates=["date"]).rename(columns = {"date":"ds"})
