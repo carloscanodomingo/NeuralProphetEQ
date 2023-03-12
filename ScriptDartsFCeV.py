@@ -22,7 +22,7 @@ from NPw_aux import prepare_EQ, ConfigEQ, prepare_ion_data
 import click
 import torch
 import signal
-MAX_TIMEOUT = 3600/ 3  # MAX TIME 20min
+MAX_TIMEOUT = 3600/ 2  # MAX TIME 20min
 MAX_VALUE ="Inf" 
 from FCeV import FCeV, FCeVConfig, METRICS
 import time
@@ -76,7 +76,7 @@ from DartsFCeV import NLinearDartsFCeVConfig,TransformerDartsFCeVConfig, DartsFC
 @click.option(
         "--simulation_scenario",
         type = click.Choice(
-            ["TEC", "SALES", "TEC_constant", "TEC_EQ"]
+            ["TEC", "SALES", "TEC_constant", "TEC_EQ", "trafic"]
             ),
         default = "TEC_EQ"
         )
@@ -223,7 +223,28 @@ def configure(
             df_covariate = df_covariate.drop("f107", axis = 1)
             config_synthetic = "constant"
         date_start = pd.Timestamp(2018, 1, 1, 12)
-
+    elif simulation_scenario =="trafic":
+        config_synthetic = "single"
+        date_start = pd.Timestamp(year= 2016, month=4, day = 1)
+        dateparse = lambda x: datetime.strptime(x, "%Y-%m-%d %H:%M:%S")
+        infile = "/home/carloscano/data/traffic/metro-traffic-volume.test.csv"
+        df = pd.read_csv(infile, parse_dates=['timestamp'], date_parser=dateparse)
+        df = df.rename(columns={"is_anomaly": "ad", "timestamp": "ds", "traffic_volume": "traffic", "rain_1h": "rain", "snow_1h": "snow", "clouds_all": "clouds"}).set_index("ds")
+        df = df[df.index > date_start]
+        df = (df.reset_index()
+                .drop_duplicates(subset='ds', keep='first')
+                .set_index('ds').sort_index())
+        df = df.resample('1H').mean().interpolate("from_derivatives")
+        df_synth = pd.DataFrame([1], columns= ["ad"])
+        df_events = df[["ad"]]
+        df_covariates = df.drop(["ad", "traffic"], axis = 1)
+        df_signal=df[["traffic"]]
+        freq = pd.Timedelta(hours=1)
+        historic_lenght =  timedelta(days=historic_lenght)
+        training_lenght = timedelta(days=training_lenght_days)
+        forecast_length = timedelta(hours=24 )
+        question_mark_length = timedelta(hours=24)
+        date_start = pd.Timestamp(2017, 1, 1)
     elif simulation_scenario == "SALES":
         datapath_sales =  data_path + "kaggle/store-sales-time-series-forecasting/"
         df_train =  pd.read_csv(datapath_sales + "train.csv", parse_dates=["date"]).rename(columns = {"date":"ds"})

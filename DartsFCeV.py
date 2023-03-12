@@ -53,7 +53,7 @@ class DartsFCeVConfig:
     patience: int
     seed: int
     probabilistic: bool
-    config_synthetic: str = "events"
+    config_synthetic: str = "single"
 
 @dataclass
 class TCNDartsFCeVConfig(metaclass = DartModelMetaClass):
@@ -240,7 +240,7 @@ class DartsFCeV:
         if synthetic_events is None:
             raise ValueError("Syntheticevents not valid")
         all_dict = {}
-        if self.config_synthetic == "events":
+        if self.config_synthetic == "single":
             for idx, synthetic_event in synthetic_events.iterrows():
                 event_offset = [
                     int(self.n_forecasts/ (periods + 1) * x)
@@ -250,7 +250,7 @@ class DartsFCeV:
                 for idx_offset in event_offset:
                     current_event = pd.DataFrame(0.0, index=np.arange(self.n_forecasts), columns = synthetic_events.columns)
                     current_event.iloc[idx_offset] = synthetic_event
-                    all_dict[f"{idx}_{idx_offset}"] = current_event
+                    all_dict[f"{idx}-{idx_offset}"] = current_event
         elif self.config_synthetic == "constant":
             for idx, synthetic_event in synthetic_events.iterrows():
                 all_dict[f"{idx}"] = pd.concat([pd.DataFrame(synthetic_event).T]*self.n_forecasts, ignore_index = True)

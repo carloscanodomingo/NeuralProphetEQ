@@ -26,8 +26,8 @@
 ##    condition is satisfied, FALSE otherwise.
 
 # 1:                     2:                                 3:      4:                             			5:
-historic_lenght          "--historic_lenght="               i      (2, 15) 
-training_lenght_days    "--training_lenght_days="           i      (30, 90) 
+historic_lenght          "--historic_lenght="               i      (2, 30) 
+training_lenght_days    "--training_lenght_days="           i      (90, 700) 
 learning_rate           "--learning_rate="                  i      (1, 4) 
 dropout                 "--dropout="                        o      (0, 0.1, 0.2, 0.3, 0.4, 0.5) 
 batch_size              "--batch_size="                     o      (400,600, 800)
@@ -35,15 +35,15 @@ epochs                	"--epochs="                         c      (300)
 n_layers             	"--n_layers="                       i      (1, 10)
 internal_size           "--internal_size="                  o      (4,8, 12,16,24,32) 
 use_gpu                 "--use_gpu="                        c      (0) 
-probabilistic           "--probabilistic="                  c      ( 1) 
+probabilistic           "--probabilistic="                  c      (1) 
 patience                "--patience="                       o      (5,10,15,20, 25, 30)
 offset_start            "offset_start="                     c      (730)
 verbose 		"--verbose=" 		            c      (0)
-data_path 		"--data_path="		            c      (/mnt/hum01-home01/ambs/y06068cc/data/)
-##data_path 		"--data_path="		            c      (/home/carloscano/data/)
-##out_path	        "--out_path="			    c      (/home/carloscano/results/)
+#data_path 		"--data_path="		            c      (/mnt/hum01-home01/ambs/y06068cc/data/)
+data_path 		"--data_path="		            c      (/home/carloscano/data/)
+out_path	        "--out_path="			    c      (/home/carloscano/results/)
 
-out_path	        "--out_path="			    c      (/mnt/hum01-home01/ambs/y06068cc/output/results/)
+#out_path	        "--out_path="			    c      (/mnt/hum01-home01/ambs/y06068cc/output/results/)
 model                   "--model="               	    c      (TCN,RNN,NBEATS,Transformer,NHITS,TFT,NLinear) 
 
 TCN_dilation_base       "--TCN_dilation_base="              i      (1, 5)    						| model == "TCN"
