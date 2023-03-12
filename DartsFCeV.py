@@ -242,7 +242,7 @@ class DartsFCeV:
         all_dict = {}
         
         if self.config_synthetic == "single":
-            all_dict[f"0"] = pd.DataFrame(0.0, index=np.arange(self.n_forecasts), columns = synthetic_events.columns)
+            all_dict[f"EMPTY"] = pd.DataFrame(0.0, index=np.arange(self.n_forecasts), columns = synthetic_events.columns)
             for idx, synthetic_event in synthetic_events.iterrows():
                 event_offset = [
                     int(self.n_forecasts/ (periods + 1) * x)
