@@ -218,12 +218,11 @@ class FCeV:
     @staticmethod
     def get_metrics_from_fc(df_current, df_pred, metrics):
         current = df_current.droplevel(0, 1)
+        num_components = len(df_pred.columns.levels[1])
         if metrics is METRICS.CoV:
-            mean_of_cov = 0
-            
-            for idx, group in df_pred.groupby(level=0, axis = 1):
-                mean_of_cov = mean_of_cov + group.droplevel(0, 1).sub(current).pow(2).mean().pow(1/2).div(current.mean(0)).mean()
-            mean_of_cov = mean_of_cov /  len(df_pred.groupby(level=0, axis = 1))
+            group = pd.DataFrame(df_pred).values
+            current = np.tile(current, group.shape[1] // num_components)
+            mean_of_cov = np.mean(np.divide(np.power(np.mean(np.power(np.subtract(group,current),2),0),1/2), np.mean(current,0)))
             return (100 * mean_of_cov)
         
         

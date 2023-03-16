@@ -223,7 +223,22 @@ def configure(
             df_covariate = df_covariate.drop("f107", axis = 1)
             config_synthetic = "constant"
         date_start = pd.Timestamp(2018, 1, 1, 12)
-    elif simulation_scenario =="trafic":
+        
+    elif case =="trafic":
+        config_synthetic = "single"
+        date_start = pd.Timestamp(year= 2017, month=7, day = 1)
+        dateparse = lambda x: datetime.strptime(x, "%Y-%m-%d %H:%M:%S")
+        df = pd.read_csv(data_path + "traffic/traffic_synthetic.csv", parse_dates=['ds'], date_parser=dateparse, index_col="ds")
+        df_synth = pd.DataFrame([1], columns= ["ad"])
+        df_events = df[["ad"]]
+        df_covariates = df.drop(["ad", "traffic"], axis = 1)
+        df_signal=df[["traffic"]]
+        freq = pd.Timedelta(hours=1)
+        historic_lenght =  timedelta(days=historic_lenght)
+        training_lenght = timedelta(days=training_lenght_days)
+        forecast_length = timedelta(hours=24 )
+        question_mark_length = timedelta(hours=24)
+    elif simulation_scenario =="trafic_old":
         config_synthetic = "single"
         date_start = pd.Timestamp(year= 2016, month=4, day = 1)
         dateparse = lambda x: datetime.strptime(x, "%Y-%m-%d %H:%M:%S")

@@ -36,11 +36,10 @@ module load apps/binapps/anaconda3/2021.11
 conda activate neuralprophet
 module load apps/gcc/R/4.0.2
 echo "running: ${BINDIR}/$RUNNER \$((\$SGE_TASK_ID - 1))"
-${BINDIR}/$RUNNER CONFIG 23 1234567 --offset_start=1095 --historic_lenght=11 --training_lenght_days=337 --learning_rate=2 --dropout=0.2 --batch_size=400 --epochs=300 --n_layers=1 --internal_size=8 --use_gpu=0 --probabilistic=1 --patience=5 offset_start=730 --verbose=0 --data_path=/mnt/hum01-home01/ambs/y06068cc/data/ --out_path=/mnt/hum01-home01/ambs/y06068cc/output/results/EQ_RNN_ --model=RNN --RNN_model=RNN --simulation_scenario=trafic --forecast_type=iteration --total_index=$nruns --current_index=\$((\$SGE_TASK_ID - 1)) --forecast_lenght_hours=24
+${BINDIR}/$RUNNER CONFIG 23 1234567 --historic_lenght=14 --training_lenght_days=400 --learning_rate=3 --dropout=0.1 --batch_size=400 --epochs=300 --n_layers=3 --internal_size=32 --use_gpu=0 --probabilistic=1 --patience=20 offset_start=730 --verbose=0 --data_path=/mnt/hum01-home01/ambs/y06068cc/data/ --out_path=/mnt/hum01-home01/ambs/y06068cc/output/results/ --model=NHITS --NBEATS_NHITS_num_blocks=1 --NBEATS_NHITS_num_stacks=10 --NBEATS_NHITS_exp_coef=20 --NHITS_max_pool_1d=0 --simulation_scenario=trafic --forecast_type=iteration --total_index=$nruns --current_index=\$((\$SGE_TASK_ID - 1)) --forecast_lenght_hours=24
 EOF
 }
 
-
-nruns=1000
+nruns=1
 LAUNCHER=qsub_job
 $LAUNCHER ScriptDartsFCeV.py $nruns 
