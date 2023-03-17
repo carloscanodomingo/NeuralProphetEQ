@@ -246,7 +246,7 @@ class DartsFCeV:
             for idx, synthetic_event in synthetic_events.iterrows():
                 event_offset = [
                     int(self.n_forecasts/ (periods + 1) * x)
-                    for x in range(1, periods + 1)
+                    for x in range(0, periods + 1)
                 ]
                 current_dict = {}
                 for idx_offset in event_offset:

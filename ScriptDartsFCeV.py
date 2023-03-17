@@ -27,6 +27,7 @@ MAX_VALUE ="Inf"
 from FCeV import FCeV, FCeVConfig, METRICS
 import time
 import math
+
 # click_example.py
 
 from DartsFCeV import NLinearDartsFCeVConfig,TransformerDartsFCeVConfig, DartsFCeVConfig,NHITSDartsFCeVConfig, NBEATSDartsFCeVConfig,RNNDartsFCeVConfig,TCNDartsFCeVConfig, TFTDartsFCeVConfig
@@ -224,7 +225,7 @@ def configure(
             config_synthetic = "constant"
         date_start = pd.Timestamp(2018, 1, 1, 12)
         
-    elif case =="trafic":
+    elif simulation_scenario =="trafic":
         config_synthetic = "single"
         date_start = pd.Timestamp(year= 2017, month=7, day = 1)
         dateparse = lambda x: datetime.strptime(x, "%Y-%m-%d %H:%M:%S")
@@ -270,6 +271,21 @@ def configure(
         df_signal =  df[["Irradiance"]]
         df_covariates = df.drop(["Irradiance", "precipitation"], axis = 1)
         df_synth = pd.DataFrame(np.arange(0.5, 3.5, 0.5), columns = ["precipitation"])
+        freq = pd.Timedelta(hours=1)
+        historic_lenght =  timedelta(days=historic_lenght)
+        training_lenght = timedelta(days=training_lenght_days)
+        forecast_length = timedelta(hours=24 )
+        question_mark_length = timedelta(hours=24)
+        
+    elif simulation_scenario == "irradiance_synth":
+        config_synthetic = "single"
+        start_day = pd.Timestamp(year= 2018, month=1, day = 1)
+        path = data_path + "irradiance/irradiance_synthetic.csv"
+        df = pd.read_csv(path, parse_dates=["ds"]).set_index("ds").sort_index()
+        df_events = df[["ad"]]
+        df_signal =  df[["Irradiance"]]
+        df_covariates = df.drop(["Irradiance", "ad"], axis = 1)
+        df_synth = pd.DataFrame([1], columns = ["precipitation"])
         freq = pd.Timedelta(hours=1)
         historic_lenght =  timedelta(days=historic_lenght)
         training_lenght = timedelta(days=training_lenght_days)

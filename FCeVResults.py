@@ -8,7 +8,7 @@ import json
 from fastcore import foundation
 from fastai import tabular
 import fastai
-from plotnine import ggplot, aes, facet_grid, labs, geom_line,geom_point, theme, geom_ribbon,theme_minimal,scale_color_brewer
+from plotnine import ggplot, aes, facet_grid, labs, geom_line,geom_point, theme, geom_ribbon,theme_minimal,scale_color_brewer, scale_fill_brewer, xlab, ylab
 import torch 
 from DartsFCeV import DartsFCeV, DartsFCeVConfig
 from fastai.tabular.all import *
@@ -16,7 +16,9 @@ from sklearn.metrics.pairwise import cosine_similarity
 import dtaidistance
 from FCeV import FCeVResultsData
 import time
-
+import xskillscore as xs
+import plotly.express as px
+import plotly.graph_objs as go
 class SUMMARY_METRICS(Enum):
     CoV = (0,)
     mape = (1,)
@@ -87,6 +89,7 @@ def get_results(df,FCeV_results_data,  metric, mean):
         result = pd.DataFrame(dict_values,  index = [group_CF.index.mean()])
         #result["pred"] = result["diff"] > 20
         result["current"] = np.max(expected.iloc[index_selected])[0]  
+        result["current_time"] = np.argmax(expected.iloc[index_selected])
         list_result.append(result)
     print(f"Duration: {time.time()-start}")   
     df_result = pd.concat(list_result)
@@ -183,7 +186,7 @@ def get_summary2(current, pred, metrics, uncer = pd.DataFrame()):
             raise ValueError("Not Implemented Yet")
             
 
-def plot_results(df_current, df_pred, start_day, end_day):
+def plot_results(df_current, df_pred, start_day, end_day, name = "Prediction"):
     df_current = df_current[(df_current.index > start_day) & (df_current.index <= end_day)]
     df_pred = df_pred[(df_pred.index > start_day) & (df_pred.index <= end_day)]
     
@@ -205,12 +208,15 @@ def plot_results(df_current, df_pred, start_day, end_day):
     plot = (ggplot(current_forecast.reset_index()) +  # What data to use
          aes(x="ds", color = "component", fill = "component")  # What variable to use
         + geom_ribbon(aes(y = "pred", ymin = "uncer_min", ymax = "uncer_max"), alpha = .2, color = 'none') #
-        + geom_line(aes(y="current"),size = 1.5)  # Geometric object to use for drawing 
         + geom_line(aes(y="pred"),linetype="dashed",size = 1.5 )  # Geometric object to use for drawing 
+        + geom_line(aes(y="current"),size = 1.5)  # Geometric object to use for drawing 
         + theme_minimal() 
         +theme(legend_position="bottom", figure_size=(15, 6))
-        + scale_color_brewer(type="qual", palette="Set1")
-            )
+        +xlab("Time")
+        + ylab(name)
+        + labs(color='none')
+        + scale_color_brewer(type="qual", palette="Set2", name="none", guide= False)
+        + scale_fill_brewer(type="qual", palette="Set2", name="none", guide= False))
     return plot
 
 
@@ -365,3 +371,47 @@ def read_result2(result_path):
     key_list = [keys for keys in all_dict.keys()]
     df_result = pd.concat(value_list, keys = key_list, axis = 1, names=["CF", "type", "component"])
     return df_result, FCeV_results_data
+
+
+
+
+def line(error_y_mode=None, **kwargs):
+    """Extension of `plotly.express.line` to use error bands."""
+    ERROR_MODES = {'bar','band','bars','bands',None}
+    if error_y_mode not in ERROR_MODES:
+        raise ValueError(f"'error_y_mode' must be one of {ERROR_MODES}, received {repr(error_y_mode)}.")
+    if error_y_mode in {'bar','bars',None}:
+        fig = px.line(**kwargs)
+    elif error_y_mode in {'band','bands'}:
+        if 'error_y' not in kwargs:
+            raise ValueError(f"If you provide argument 'error_y_mode' you must also provide 'error_y'.")
+        figure_with_error_bars = px.line(**kwargs)
+        fig = px.line(**{arg: val for arg,val in kwargs.items() if arg != 'error_y'})
+        for data in figure_with_error_bars.data:
+            x = list(data['x'])
+            y_upper = list(data['y'] + data['error_y']['array'])
+            y_lower = list(data['y'] - data['error_y']['array'] if data['error_y']['arrayminus'] is None else data['y'] - data['error_y']['arrayminus'])
+            color = f"rgba({tuple(int(data['line']['color'].lstrip('#')[i:i+2], 16) for i in (0, 2, 4))},.3)".replace('((','(').replace('),',',').replace(' ','')
+            fig.add_trace(
+                go.Scatter(
+                    x = x+x[::-1],
+                    y = y_upper+y_lower[::-1],
+                    fill = 'toself',
+                    fillcolor = color,
+                    line = dict(
+                        color = 'rgba(255,255,255,0)'
+                    ),
+                    hoverinfo = "skip",
+                    showlegend = False,
+                    legendgroup = data['legendgroup'],
+                    xaxis = data['xaxis'],
+                    yaxis = data['yaxis'],
+                )
+            )
+        # Reorder data as said here: https://stackoverflow.com/a/66854398/8849755
+        reordered_data = []
+        for i in range(int(len(fig.data)/2)):
+            reordered_data.append(fig.data[i+int(len(fig.data)/2)])
+            reordered_data.append(fig.data[i])
+        fig.data = tuple(reordered_data)
+    return fig
