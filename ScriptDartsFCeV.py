@@ -466,13 +466,13 @@ def configure(
             queue.close()
             del queue
             if probabilistic:
-            cov_result = (
-                    current_fcev.get_metrics_from_fc(df_fore["current"], df_fore["BASE"], METRICS.CRPS)
-            )
+                cov_result = (
+                        current_fcev.get_metrics_from_fc(df_fore["current"], df_fore["BASE"], METRICS.CRPS)
+                )
             else:
-            cov_result = (
-                    current_fcev.get_metrics_from_fc(df_fore["current"], df_fore["BASE"], METRICS.CoV)
-            )                
+                cov_result = (
+                        current_fcev.get_metrics_from_fc(df_fore["current"], df_fore["BASE"], METRICS.CoV)
+                )                
             if math.isnan(cov_result):
                 cov_result = MAX_VALUE
             sys.stdout = sys.__stdout__
