@@ -107,7 +107,7 @@ def read_EQ_data(dir_path):
 ""
 
 
-def process_eq(df_events, station_names, mean_location, freq):
+def process_eq(df_events, mean_location,start_time,  freq):
     # Create geodesic object to compute dist and azimuth
     geodesic = pyproj.Geod(ellps="WGS84")
 
@@ -134,9 +134,9 @@ def process_eq(df_events, station_names, mean_location, freq):
     # Resample and select the EQ with the lowest value of PR
     # Not the most pretty solution but i cant see any other option.
     # https://github.com/pandas-dev/pandas/issues/47963
-    grouper_pr = df_events.resample(freq, origin="2016-01-01 00:00:00")[["pr"]]
+    grouper_pr = df_events.resample(freq, origin=start_time)[["pr"]]
     idxmax = [np.argmax(group[1]) for group in grouper_pr if group[1].empty == False]
-    grouper_all = df_events.resample(freq, origin="2016-01-01 00:00:00")
+    grouper_all = df_events.resample(freq, origin=start_time)
     list_groups = [group for group in grouper_all if group[1].empty == False]
     list_series = list()
     for current_group, idx in zip(list_groups, idxmax):
@@ -341,28 +341,18 @@ def read_irradiance_data(path_data, site):
     df_irradiance.index = df_irradiance.index.tz_convert(None)
 
     return df_irradiance
+def prepare_HM_data(path_data, site, freq, start_time):
+    df_eq = read_EQ_data(path_data + eq_path)
+    if site == "HM001":
+        mean_location = {"latitude": 37.134493, "longitude":-122.118413}
+    df_eq = process_eq(
+        df_eq, mean_location=mean_location, freq=freq, start_time = start_time
+    )
+    return df_eq
 
-
-def prepare_ion_data(path_data, site, freq, type="complete"):
+def prepare_ion_data(path_data, site, freq):
     station_names, mean_location = get_station_names(path_data + stations_path, site)
     df_GNSSTEC = read_GNSSTEC_data(path_data + GNSSTEC_path, station_names)
-    # Not very useful since it has to be related to the hour of the sun
-    if type == "hourly":
-        if pd.Timedelta(freq) < pd.Timedelta(days=1):
-            raise KeyError("Freq has to be greater than 1d")
-        df_GNSSTEC["hour"] = df_GNSSTEC.index.hour
-        pd_df_ion_hour = pd.DataFrame()
-        query_hour = "hour == {hour}"
-        for hour in df_GNSSTEC.index.hour.unique():
-            current_df_ion_hour = (
-                df_GNSSTEC.query(query_hour.format(hour=hour))
-                .drop("hour", axis=1)
-                .resample(rule="1d")
-                .mean()
-            )
-            current_df_ion_hour.columns = current_df_ion_hour.columns + "_" + str(hour)
-            pd_df_ion_hour = pd.concat([pd_df_ion_hour, current_df_ion_hour], axis=1)
-        df_GNSSTEC = pd_df_ion_hour
 
     df_GNSSTEC = process_input_data(df_GNSSTEC, freq)
     remove_outliers(df_GNSSTEC, 4)
@@ -373,12 +363,15 @@ def prepare_ion_data(path_data, site, freq, type="complete"):
     df_ion = df_ion[["Kp", "f107", "N sunspot"]]
     df_ion = df_ion.resample(rule=freq).ffill()
     df_ion.index.names = ["ds"]
+    df_ion.sort_index()
+
+    start_time = df_ion.index[0]
 
     df_irradiance = read_irradiance_data(path_data, site)
     df_irradiance.index.names = ["ds"]
     df_eq = read_EQ_data(path_data + eq_path)
     df_eq = process_eq(
-        df_eq, station_names=station_names, mean_location=mean_location, freq=freq
+        df_eq, mean_location=mean_location, freq=freq, start_time = start_time
     )
     df_covariate = pd.merge(
         df_irradiance, df_ion, left_index=True, right_index=True, how="outer"

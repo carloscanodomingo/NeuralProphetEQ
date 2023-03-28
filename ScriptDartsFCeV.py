@@ -171,6 +171,7 @@ def configure(
     np.random.seed(seed)
         # Read SR and EQ data
     config_synthetic = "events"
+    len_iteration = None
     if verbose == 0:
         sys.stdout = open(os.devnull, "w")
         sys.stderr = open(os.devnull, "w")
@@ -200,7 +201,32 @@ def configure(
 
         if epochs == 0:
             epochs = None
+        if simulation_scenario == "SR":
+            ConfigEQ_d = {
+                "dist_start": 3000,
+                "dist_delta": 30000,
+                "mag_start": 6,
+                "mag_delta": 1,
+                "filter": 1,
+                "drop": ["arc_cos", "arc_sin","depth",  "dist", "mag"],
+            }
+            config_events = ConfigEQ(**ConfigEQ_d)
 
+            dateparse = lambda x: datetime.strptime(x, "%d-%b-%Y %H:%M:%S")
+            df = pd.read_csv(data_path + "SR/SR_HM_001.csv", parse_dates=['time'], date_parser=dateparse)
+            df = df.rename(columns={"time": "ds"}).set_index("ds")
+            input_columns = ["A1", "B1", "C1"]
+            freq = timedelta(hours=1)
+            start_time = df.index[0]
+            site = "HM001"
+            df_eq = NPw_aux.prepare_HM_data(data_path, site, freq, start_time)
+            df_events = prepare_EQ(df_eq, config_events)    
+            df_events = df_events[(df_events.index > df.index[0]) & (df_events.index < df.index[-1])]
+            values = np.arange(0,11,1)
+            synthetic_events = pd.DataFrame(values, columns= [tag])
+            df_covariates = df.drop(input_columns, axis = 1)
+            df_signal = df[input_columns]
+            config_synthetic = "single"
         if simulation_scenario == "TEC_EQ":
             synthetic_events = pd.read_pickle(data_path+"synthetic_raw.pkl")
             df_events = prepare_EQ(df_eq, config_events)
@@ -279,7 +305,7 @@ def configure(
         
     elif simulation_scenario == "irradiance_synth":
         config_synthetic = "single"
-        start_day = pd.Timestamp(year= 2018, month=1, day = 1)
+        date_start = pd.Timestamp(year= 2018, month=1, day = 1)
         path = data_path + "irradiance/irradiance_synthetic.csv"
         df = pd.read_csv(path, parse_dates=["ds"]).set_index("ds").sort_index()
         df_events = df[["ad"]]
@@ -439,9 +465,14 @@ def configure(
         if df_fore is not None:
             queue.close()
             del queue
+            if probabilistic:
+            cov_result = (
+                    current_fcev.get_metrics_from_fc(df_fore["current"], df_fore["BASE"], METRICS.CRPS)
+            )
+            else:
             cov_result = (
                     current_fcev.get_metrics_from_fc(df_fore["current"], df_fore["BASE"], METRICS.CoV)
-            )
+            )                
             if math.isnan(cov_result):
                 cov_result = MAX_VALUE
             sys.stdout = sys.__stdout__
@@ -458,7 +489,7 @@ def configure(
             pass
 
     elif forecast_type == "iteration":
-        current_fcev.create_iteration(date_start, total_index)
+        current_fcev.create_iteration(date_start, total_index, len_iteration)
         df_fore = current_fcev.process_iteration(current_index)
         current_fcev.save_results(df_fore)
         sys.exit(0)

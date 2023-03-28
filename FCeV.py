@@ -19,6 +19,8 @@ from IPython.core.display import HTML
 import json
 from DartsFCeV import DartsFCeV, DartsFCeVConfig
 import lzma
+import seaborn as sns
+import xskillscore as xs
 
 class METRICS(Enum):
     CoV = (0,)
@@ -30,6 +32,7 @@ class METRICS(Enum):
     PRESS = (6,)
     RMSE_sigma = (7,)
     DTW = (8, )
+    CRPS = (10,)
 
 
 
@@ -193,9 +196,10 @@ class FCeV:
         )
         return df_forecast
 
-    def create_iteration(self, date_start, n_iteration):
+    def create_iteration(self, date_start, n_iteration, len_iteration = None):
         self.iterations = pd.DataFrame(columns=["start_date", "end_date"])
-        len_iteration = self.FCeV_config.forecast_length
+        if len_iteration is None:
+            len_iteration = self.FCeV_config.forecast_length
         max_number_iteration = int((self.end_date- date_start- self.FCeV_config.forecast_length) // len_iteration)
         if n_iteration is None:
             n_iteration = max_number_iteration
@@ -215,10 +219,23 @@ class FCeV:
 
         mean_pred_values = df_forecast["current"].mean().mean()
         return df_forecast.mean() / mean_pred_values
+    
     @staticmethod
     def get_metrics_from_fc(df_current, df_pred, metrics):
         current = df_current.droplevel(0, 1)
         num_components = len(df_pred.columns.levels[1])
+        if metrics is METRICS.CRPS:
+            df_score  = pd.melt(df_pred, ignore_index=False)
+            df_score.columns = ["member", "input", "yhat"]
+            df_score = df_score.set_index(["member", "input"], append = True)
+            
+            df_current = pd.melt(df_current.droplevel(0,1), ignore_index=False)
+            df_current.columns = [ "input", "y"]
+            df_current = df_current.set_index(["input"], append = True)
+            ds = df_current.to_xarray()
+            ds['yhat'] = df_score.to_xarray()['yhat']
+
+            return ds.xs.crps_ensemble('y', 'yhat').to_numpy()
         if metrics is METRICS.CoV:
             group = pd.DataFrame(df_pred).values
             current = np.tile(current, group.shape[1] // num_components)

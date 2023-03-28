@@ -303,7 +303,6 @@ class DartsFCeV:
         # Todo Improve val 
         training_val = self.series_base[-(len(val_base) + self.n_lags):]
 
-
         self.fit(train_base,training_val, series_covariate,  series_events )
         # Compute just one long forecast
         dict_out = self.test(val_base, series_covariate, series_events,scaler_base, scaler_events)

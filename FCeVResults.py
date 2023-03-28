@@ -9,9 +9,11 @@ from fastcore import foundation
 from fastai import tabular
 import fastai
 from plotnine import ggplot, aes, facet_grid, labs, geom_line,geom_point, theme, geom_ribbon,theme_minimal,scale_color_brewer, scale_fill_brewer, xlab, ylab
+import plotnine as p9
 import torch 
 from DartsFCeV import DartsFCeV, DartsFCeVConfig
 from fastai.tabular.all import *
+import sklearn
 from sklearn.metrics.pairwise import cosine_similarity
 import dtaidistance
 from FCeV import FCeVResultsData
@@ -19,6 +21,9 @@ import time
 import xskillscore as xs
 import plotly.express as px
 import plotly.graph_objs as go
+import seaborn as sns
+
+size_seaborn_font = 2
 class SUMMARY_METRICS(Enum):
     CoV = (0,)
     mape = (1,)
@@ -135,6 +140,195 @@ def get_summary(current, pred, metrics):
         else:
             raise ValueError("Not Implemented Yet")
             
+            
+            
+def plot_scatter_hour(df_result, current_values, CF, path, palete):
+    
+    df_violin = df_result.copy()
+    df_violin = df_violin[current_values > 0]
+    df_violin.columns = df_violin.columns.str.split("-", expand=True)
+    column = df_violin.pop("EMPTY")
+    ref = column
+    time = df_violin["current_time"].squeeze()
+    df_violin = df_violin.drop(["current", "current_time"], 1)
+    df_violin = pd.DataFrame(df_violin.T.values / ref.T.values, index = df_violin.columns).T
+    df_violin = df_violin[CF].sort_index(1)
+    df_violin = df_violin.min(level = 1, axis = 1)
+    columns = df_violin.columns
+
+    selected = df_violin.apply(lambda x: columns[np.argmin(x)], axis = 1)
+    selected_min = df_violin.apply(lambda x: min(x), axis = 1)
+
+    df_visualize = pd.DataFrame([selected.values, selected_min.values, time.values]).T
+    df_visualize.columns = columns=["H", "CFR", "Ground Truth Hour"]
+    df_visualize["H"] = df_visualize["H"].astype('int')
+    df_visualize["Ground Truth Hour"] = df_visualize["Ground Truth Hour"].astype('int')
+    sns.set(rc={'figure.figsize':(20,8)})
+    sns.set(font_scale = size_seaborn_font)
+    # Create a visualization
+    # Set the palette using the name of a palette:
+    #sns.color_palette("Spectral", as_cmap=True)
+    #sns.set_palette("Spectral")
+    sns_plot = sns.scatterplot(
+        data=df_visualize,
+        x="Ground Truth Hour", y="CFR",hue = 'H',  s=600, alpha=1, palette= sns.color_palette(palete, as_cmap=True)
+    )
+    sns_plot.legend(title='hypotesis', loc='upper left', frameon=True)
+    for lh in sns_plot.legend_.legendHandles: 
+        lh.set_alpha(1)
+        lh._sizes = [200] 
+
+    
+        # You can also use lh.set_sizes([50])
+    fig = sns_plot.get_figure()
+    
+    fig.savefig(path, bbox_inches='tight')
+
+
+def plot_roc(df_result, current_values, CF_level, CF_hour,treshold_list, path):
+
+    df_compress = df_result.copy()
+    df_ref = df_compress[["EMPTY"]]
+
+    df_compress.columns = df_compress.columns.str.split("-", expand=True)
+    df_compress = df_compress[CF_level]
+    df_compress.head()
+
+    df_compress = df_compress.mean(level=1, axis = 1)
+    df_compress = df_compress[CF_hour]
+    df_compress = df_compress.mean(1)
+    df_compress = -(df_compress.values.T  /df_ref.values.T)
+    df_compress = pd.DataFrame(df_compress).T
+
+
+    list_roc = list()
+    list_index = list()
+    for threshold in treshold_list:
+        y_pred_prob = df_compress.mean(1)
+        #y_test = (df_result["current"] >thrshold_precipitation)  & (df_result["current_time"] > 8) & ( df_result["current_time"] < 18)
+        y_test = (df_result["current"] > threshold)  
+        FPR, TPR, _ = sklearn.metrics.roc_curve(y_test,  y_pred_prob, drop_intermediate = False)
+        pd_roc = pd.DataFrame([FPR,TPR]).T
+        pd_roc.columns = ["FPR", "TPR"]
+        list_roc.append(pd_roc)
+        list_index.append(f"{threshold}")
+
+
+    pd_all_roc = pd.concat(list_roc, keys = list_index, axis =1)
+
+    if len(pd_all_roc.columns.levels[0]) > 1:
+        pd_all_roc = pd_all_roc.unstack().unstack(level=1).reset_index(level=1, drop=True).rename_axis('level').reset_index()
+    else:
+        pd_all_roc = pd_all_roc.unstack().unstack(level=1).reset_index(level=1, drop=True).rename_axis('level').reset_index()
+    sns.set(rc={'figure.figsize':(10,10)})
+    sns.set_palette("pastel")
+    sns.set(font_scale = size_seaborn_font)
+    sns_plot = sns.lineplot(data=pd_all_roc, x="FPR", y="TPR", hue="level", linewidth=3)
+    sns_plot.legend(title='Level', loc='lower right', frameon=True)
+    fig = sns_plot.get_figure()
+    fig.savefig(path, bbox_inches='tight')
+    
+    
+    
+def plot_roc_hours(df_result, CF_level, CF_hour, path):
+    df_compress = df_result.copy()
+    df_ref = df_compress[["EMPTY"]]
+
+    df_compress.columns = df_compress.columns.str.split("-", expand=True)
+    df_compress = df_compress[CF_level]
+    df_compress.head()
+
+    df_compress = df_compress.mean(level=1, axis = 1)
+    df_compress = df_compress[CF_hour]
+    df_compress = df_compress.mean(1)
+    df_compress = -(df_compress.values.T  /df_ref.values.T)
+    df_compress = pd.DataFrame(df_compress).T
+
+
+    list_roc = list()
+    list_index = list()
+
+    thrshold_precipitation = 1
+    list_roc = list()
+    list_index = list()
+    for hour_offset in np.arange(0,13,2):
+        y_pred_prob = df_compress.mean(1)
+        y_test = (df_result["current"] )  & (df_result["current_time"] >= hour_offset ) & ( df_result["current_time"] < 12 + hour_offset)
+        FPR, TPR, _ = sklearn.metrics.roc_curve(y_test,  y_pred_prob, drop_intermediate = False)
+        pd_roc = pd.DataFrame([FPR,TPR]).T
+        pd_roc.columns = ["FPR", "TPR"]
+        list_roc.append(pd_roc)
+        list_index.append(f"{hour_offset}:00 to {hour_offset+12}:00")  
+    pd_all_roc = pd.concat(list_roc, keys = list_index, axis =1)
+
+    if len(pd_all_roc.columns.levels[0]) > 1:
+        pd_all_roc = pd_all_roc.unstack().unstack(level=1).reset_index(level=1, drop=True).rename_axis('level').reset_index()
+    else:
+        pd_all_roc = pd_all_roc.unstack().unstack(level=1).reset_index(level=1, drop=True).rename_axis('level').reset_index()
+    sns.set(rc={'figure.figsize':(10,10)})
+    sns.set_palette("pastel")
+    sns.set(font_scale = size_seaborn_font)
+    sns_plot = sns.lineplot(data=pd_all_roc, x="FPR", y="TPR", hue="level", linewidth=3)
+    sns_plot.legend(title='Level', loc='lower right', frameon=True)
+    fig = sns_plot.get_figure()
+    fig.savefig(path, bbox_inches='tight')
+
+def plot_violin_level(df_result, current_values, CF, path, limit = None):
+    
+    df_violin = df_result.copy()
+    df_violin.columns = df_violin.columns.str.split("-", expand=True)
+    column = df_violin.pop("EMPTY")
+    ref = column
+    df_violin = df_violin.drop(["current", "current_time"], 1)
+    df_violin = df_violin.loc[:, pd.IndexSlice[:, CF]]
+    df_violin = pd.DataFrame(df_violin.T.values / ref.T.values, index = df_violin.columns).T
+    df_violin["class"] = current_values
+    sns.set(rc={'figure.figsize':(20,8)})
+    df_violin = pd.melt(df_violin, id_vars="class",var_name='hypotesis Level', value_name='CFR')
+    sns.set(font_scale = size_seaborn_font)
+    if len((df_violin["class"].unique() == 2)):
+        split = True
+    else: 
+        split = False
+    sns.set_palette("pastel")
+    sns_plot = sns.violinplot(data=df_violin, x = "hypotesis Level", y="CFR", hue = "class",split = split,   showfliers = False, inner = "quartile", scale = "width")
+   
+    sns_plot.legend(title='Ground Truth', loc='upper left', frameon=True)
+    if limit is not None:
+        sns_plot.set(ylim=limit)
+    fig = sns_plot.get_figure()
+    fig.savefig(path, bbox_inches='tight')
+    
+    
+def plot_violin_hour(df_result,current_values, CF, path, limit = None):
+    
+    df_result_split = df_result.copy()
+    ref = df_result_split[["EMPTY"]]
+    df_result_split.columns = df_result_split.columns.str.split("-", expand=True)
+    df_result_split = df_result_split[CF].sort_index(1)
+    df_result_split = df_result_split.mean(level=1, axis = 1)
+    df_result_split.columns = [int(values) for values in df_result_split.columns]
+    df_violin = df_result_split.copy()
+    df_violin = pd.DataFrame(df_violin.T.values / ref.T.values, index = df_violin.columns).T
+    df_violin["class"] = current_values
+    if len(df_violin["class"].unique()) == 2:
+        split = True
+    else: 
+        split = False
+    print(split)
+    sns.set(rc={'figure.figsize':(20,8.27)})
+    sns.set(font_scale = size_seaborn_font)
+    df_violin = pd.melt(df_violin, id_vars="class",var_name='Hypothesis Hours', value_name='CFR')
+    sns.set_palette("pastel")
+    sns_plot = sns.violinplot(data=df_violin, x = "Hypothesis Hours", y="CFR", hue = "class", split=split, showfliers = False, inner = "quartile", scale = "width")
+    sns_plot.legend(title='Ground Truth', loc='upper left', frameon=True)
+    if limit is not None:
+        sns_plot.set(ylim=limit)
+    
+    fig = sns_plot.get_figure()
+    fig.savefig(path, bbox_inches='tight')
+    
+    
     
 def get_summary2(current, pred, metrics, uncer = pd.DataFrame()):
         if metrics is SUMMARY_METRICS.CoV:
@@ -186,7 +380,7 @@ def get_summary2(current, pred, metrics, uncer = pd.DataFrame()):
             raise ValueError("Not Implemented Yet")
             
 
-def plot_results(df_current, df_pred, start_day, end_day, name = "Prediction"):
+def plot_results(df_current, df_pred, start_day, end_day, name = "Prediction", size = (15, 6)):
     df_current = df_current[(df_current.index > start_day) & (df_current.index <= end_day)]
     df_pred = df_pred[(df_pred.index > start_day) & (df_pred.index <= end_day)]
     
@@ -211,9 +405,10 @@ def plot_results(df_current, df_pred, start_day, end_day, name = "Prediction"):
         + geom_line(aes(y="pred"),linetype="dashed",size = 1.5 )  # Geometric object to use for drawing 
         + geom_line(aes(y="current"),size = 1.5)  # Geometric object to use for drawing 
         + theme_minimal() 
-        +theme(legend_position="bottom", figure_size=(15, 6))
+        +theme(legend_position="bottom", figure_size=size, axis_title_x=p9.element_text(size=16, colour="black"),axis_title_y=p9.element_text(size=16, colour="black"))
         +xlab("Time")
         + ylab(name)
+            
         + labs(color='none')
         + scale_color_brewer(type="qual", palette="Set2", name="none", guide= False)
         + scale_fill_brewer(type="qual", palette="Set2", name="none", guide= False))
