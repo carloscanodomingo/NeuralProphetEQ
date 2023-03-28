@@ -18,6 +18,7 @@ import pandas as pd
 from multiprocessing import Process, Queue
 from NPw import ConfigEQ
 import sys
+import NPw_aux
 from NPw_aux import prepare_EQ, ConfigEQ, prepare_ion_data
 import click
 import torch
@@ -77,7 +78,7 @@ from DartsFCeV import NLinearDartsFCeVConfig,TransformerDartsFCeVConfig, DartsFC
 @click.option(
         "--simulation_scenario",
         type = click.Choice(
-            ["TEC", "SALES", "TEC_constant", "TEC_EQ", "trafic", "irradiance"]
+            ["SR", "TEC", "SALES", "TEC_constant", "TEC_EQ", "trafic", "irradiance"]
             ),
         default = "TEC_EQ"
         )
@@ -175,7 +176,39 @@ def configure(
     if verbose == 0:
         sys.stdout = open(os.devnull, "w")
         sys.stderr = open(os.devnull, "w")
-    if  simulation_scenario == "TEC" or simulation_scenario == "TEC_constant" or simulation_scenario == "TEC_EQ":
+    if simulation_scenario == "SR":
+        ConfigEQ_d = {
+            "dist_start": 3000,
+            "dist_delta": 30000,
+            "mag_start": 6,
+            "mag_delta": 1,
+            "filter": 1,
+            "drop": ["arc_cos", "arc_sin","depth",  "dist", "mag"],
+        }
+        config_events = ConfigEQ(**ConfigEQ_d)
+        date_start = pd.Timestamp(year= 2019, month=6, day = 1)
+        dateparse = lambda x: datetime.strptime(x, "%d-%b-%Y %H:%M:%S")
+        df = pd.read_csv(data_path + "SR/SR_HM_001.csv", parse_dates=['time'], date_parser=dateparse)
+        df = df.rename(columns={"time": "ds"}).set_index("ds")
+        input_columns = ["A1", "B1", "C1"]
+        freq = timedelta(hours=1)
+        start_time = df.index[0]
+        site = "HM001"
+        df_eq = NPw_aux.prepare_HM_data(data_path, site, freq, start_time)
+        df_events = prepare_EQ(df_eq, config_events)    
+        df_events = df_events[(df_events.index > df.index[0]) & (df_events.index < df.index[-1])]
+        values = np.arange(0,11,1)
+        df_synth = pd.DataFrame(values, columns= ["pr"])
+        df_covariates = df.drop(input_columns, axis = 1)
+        df_signal = df[input_columns]
+        config_synthetic = "single"
+        len_iteration = pd.Timedelta(hours=12)
+        forecast_length = timedelta(hours=forecast_lenght_hours)
+        question_mark_length = timedelta(hours=forecast_lenght_hours)
+        # Time to take into account to predict
+        historic_lenght = timedelta(days=historic_lenght)
+        training_lenght = timedelta(days=training_lenght_days)
+    elif  simulation_scenario == "TEC" or simulation_scenario == "TEC_constant" or simulation_scenario == "TEC_EQ":
         ConfigEQ_d = {
         "dist_start": 100,
         "dist_delta": 6000,
@@ -198,36 +231,11 @@ def configure(
         # Time to take into account to predict
         historic_lenght = timedelta(days=historic_lenght)
         training_lenght = timedelta(days=training_lenght_days)
-
+        print(simulation_scenario)
         if epochs == 0:
             epochs = None
-        if simulation_scenario == "SR":
-            ConfigEQ_d = {
-                "dist_start": 3000,
-                "dist_delta": 30000,
-                "mag_start": 6,
-                "mag_delta": 1,
-                "filter": 1,
-                "drop": ["arc_cos", "arc_sin","depth",  "dist", "mag"],
-            }
-            config_events = ConfigEQ(**ConfigEQ_d)
-
-            dateparse = lambda x: datetime.strptime(x, "%d-%b-%Y %H:%M:%S")
-            df = pd.read_csv(data_path + "SR/SR_HM_001.csv", parse_dates=['time'], date_parser=dateparse)
-            df = df.rename(columns={"time": "ds"}).set_index("ds")
-            input_columns = ["A1", "B1", "C1"]
-            freq = timedelta(hours=1)
-            start_time = df.index[0]
-            site = "HM001"
-            df_eq = NPw_aux.prepare_HM_data(data_path, site, freq, start_time)
-            df_events = prepare_EQ(df_eq, config_events)    
-            df_events = df_events[(df_events.index > df.index[0]) & (df_events.index < df.index[-1])]
-            values = np.arange(0,11,1)
-            synthetic_events = pd.DataFrame(values, columns= [tag])
-            df_covariates = df.drop(input_columns, axis = 1)
-            df_signal = df[input_columns]
-            config_synthetic = "single"
-        if simulation_scenario == "TEC_EQ":
+       
+        elif simulation_scenario == "TEC_EQ":
             synthetic_events = pd.read_pickle(data_path+"synthetic_raw.pkl")
             df_events = prepare_EQ(df_eq, config_events)
             df_synth = prepare_EQ(synthetic_events, config_events)
