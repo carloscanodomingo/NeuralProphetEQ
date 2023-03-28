@@ -19,7 +19,6 @@ from IPython.core.display import HTML
 import json
 from DartsFCeV import DartsFCeV, DartsFCeVConfig
 import lzma
-import seaborn as sns
 import xskillscore as xs
 
 class METRICS(Enum):
