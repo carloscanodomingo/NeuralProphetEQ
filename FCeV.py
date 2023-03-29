@@ -124,7 +124,10 @@ class FCeV:
                 "forecast_length":               self.FCeV_config.forecast_length,
                 "input_length":               self.FCeV_config.input_length,
                 "training_length": self.FCeV_config.training_length,
+                "training_length": self.FCeV_config.question_mark_length,
                 "freq": self.FCeV_config.freq, 
+                "n_forecast": self.FCeV_model.n_forecasts,
+                "covariate_type": self.FCeV_model.covariate_type,
                 "n_forecast": self.FCeV_model.n_forecasts,
                }
 

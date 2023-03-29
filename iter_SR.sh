@@ -36,11 +36,10 @@ module load apps/binapps/anaconda3/2021.11
 conda activate neuralprophet
 module load apps/gcc/R/4.0.2
 echo "running: ${BINDIR}/$RUNNER \$((\$SGE_TASK_ID - 1))"
-${BINDIR}/$RUNNER CONFIG 23 1234567 --offset_start=1095 --historic_lenght=10 --training_lenght_days=459 --learning_rate=4 --dropout=0.3 --batch_size=800 --epochs=300 --n_layers=1 --internal_size=32 --use_gpu=0 --probabilistic=1 --patience=30 offset_start=730 --verbose=0 --data_path=/mnt/hum01-home01/ambs/y06068cc/data/ --out_path=/mnt/hum01-home01/ambs/y06068cc/output/results/irradiance/final__ --model=RNN --RNN_model=LSTM --simulation_scenario=irradiance_synth --forecast_type=iteration --total_index=$nruns --current_index=\$((\$SGE_TASK_ID - 1)) --forecast_lenght_hours=24
+${BINDIR}/$RUNNER CONFIG 23 1234567 --offset_start=1095 --historic_lenght=10 --training_lenght_days=1000 --learning_rate=4 --dropout=0.3 --batch_size=800 --epochs=300 --n_layers=1 --internal_size=32 --use_gpu=0 --probabilistic=1 --patience=30 offset_start=730 --verbose=0 --data_path=/mnt/hum01-home01/ambs/y06068cc/data/ --out_path=/mnt/hum01-home01/ambs/y06068cc/output/results/irradiance/SR_ --model=RNN --RNN_model=LSTM --simulation_scenario=SR --forecast_type=iteration --total_index=$nruns --current_index=\$((\$SGE_TASK_ID - 1)) --forecast_lenght_hours=24
 EOF
 }
 
-
-nruns=1000
+nruns=200
 LAUNCHER=qsub_job
 $LAUNCHER ScriptDartsFCeV.py $nruns 

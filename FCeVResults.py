@@ -15,7 +15,6 @@ from DartsFCeV import DartsFCeV, DartsFCeVConfig
 from fastai.tabular.all import *
 import sklearn
 from sklearn.metrics.pairwise import cosine_similarity
-import dtaidistance
 from FCeV import FCeVResultsData
 import time
 import xskillscore as xs
@@ -37,6 +36,53 @@ class SUMMARY_METRICS(Enum):
     ZDENS = (9, )
     CRPS = (10,)
     
+def get_result_file(df,  FCeV_results_data,  metric, mean):
+    index_synth = list(FCeV_results_data["df_synthetics"].keys())
+    values_synth = [value.max().values[0] for value in FCeV_results_data["df_synthetics"].values()]
+    CF_events = pd.DataFrame(values_synth, index = index_synth, columns = ["CF"])
+    list_columns = [True if value in CF_events.index else False for value in df.columns.levels[0]]
+    remove_columns = df.columns.levels[0][np.logical_not(list_columns)]
+    
+    df_current = df["current"].sort_index().values
+    
+    df_pred = df.drop(remove_columns, axis = 1, level = 0)
+    num_components = len(df_pred.columns.levels[2])
+
+    start_index = df_pred.index[0]
+    dict_values = {}
+    
+    for idx_CF, group_CF in df_pred.groupby(level=0, axis = 1):
+        if mean == True:
+            group_CF = group_CF.mean(axis = 1,level=2)
+        if metric == SUMMARY_METRICS.CRPS:
+            ds = pd.DataFrame(df_current, columns = ["y"], index = group_CF.index).to_xarray()
+            df_score  = pd.melt(group_CF.droplevel(0, 1), var_name='member', value_name='yhat', ignore_index=False)#.reset_index(drop=True)
+            df_score.set_index(["member"], append = True, inplace = True)
+            ds['yhat'] = df_score.to_xarray()['yhat']
+            dict_values[idx_CF] = ds.xs.crps_ensemble('y', 'yhat').to_numpy()
+
+        if metric == SUMMARY_METRICS.CoV:
+            df_current = np.tile(df_current, group_CF.shape[1] // num_components)
+            dict_values[idx_CF] = np.median(np.divide(np.power(np.mean(np.power(np.subtract(group_CF,df_current),2),0),1/2), np.mean(df_current,0)))
+        elif metric == SUMMARY_METRICS.RMSE:
+            df_current = np.tile(df_current, group_CF.shape[1] // num_components)
+            dict_values[idx_CF] = np.mean(np.power(np.mean(np.power(np.subtract(group_CF,df_current),2),0),1/2))
+        elif metric is SUMMARY_METRICS.ZSCORE:
+            group_CF = group_CF.mean(axis = 1,level=2)
+            df_current = df_current_base[index_selected,:]
+        elif metric is SUMMARY_METRICS.CosSim:
+            df_current = np.tile(df_current, group_CF.shape[1] // num_components)
+            dict_values[idx_CF]  = 1 - np.mean(np.diag(cosine_similarity(np.transpose(df_current), np.transpose(group_CF))))
+        elif metric is SUMMARY_METRICS.DTW:
+            import dtaidistance
+        elif metric is SUMMARY_METRICS.PRESS:
+            dict_values[idx_CF] =  np.mean(np.sum(np.power(np.subtract(df_current,group_CF), 2),0))
+    
+    result = pd.DataFrame(dict_values,  index = [group_CF.index[0].round(freq='s')])
+    return result
+
+
+
 def get_results(df,FCeV_results_data,  metric, mean):
     input_length = FCeV_results_data["n_forecast"]
     df_events = FCeV_results_data["df_events"]
@@ -50,7 +96,6 @@ def get_results(df,FCeV_results_data,  metric, mean):
     df_current_base = df["current"].sort_index()
     df_pred = df.drop(remove_columns, axis = 1, level = 0)
     df_current_base = df_current_base.loc[df_pred.index].values
-    #df_current_base = np.tile(df_current_base, len(df_pred.columns.levels[1]) - 1)
     num_components = len(df_pred.columns.levels[2])
     expected = FCeV_results_data["df_events"].loc[df_pred.index]
     df_results = pd.DataFrame()
@@ -244,7 +289,6 @@ def plot_roc_hours(df_result, CF_level, CF_hour, path):
     df_compress = -(df_compress.values.T  /df_ref.values.T)
     df_compress = pd.DataFrame(df_compress).T
 
-
     list_roc = list()
     list_index = list()
 
@@ -272,7 +316,13 @@ def plot_roc_hours(df_result, CF_level, CF_hour, path):
     sns_plot.legend(title='Level', loc='lower right', frameon=True)
     fig = sns_plot.get_figure()
     fig.savefig(path, bbox_inches='tight')
-
+def get_current(df_results, FCeV_results_data):
+    for row in df_results.itterrows():
+        df_results
+        expected = FCeV_results_data["df_events"].loc[df_pred.index]
+        result["current"] = np.max(expected.iloc[index_selected])[0]  
+        result["current_time"] = np.argmax(expected.iloc[index_selected])
+    
 def plot_violin_level(df_result, current_values, CF, path, limit = None):
     
     df_violin = df_result.copy()
@@ -513,7 +563,26 @@ def predict_from_metrics(df, df_events, metric, input_length, synth):
                 df_out["current"] = expected.mean().values[0]
                 df_results = pd.concat([df_results, df_out])
         return df_results
+
     
+def read_result_files(result_path):
+    all_dict = {}
+    value_list = list()
+    key_list = list()
+    result_config = list(Path(result_path).rglob("*config.cpkl"))
+    FCeV_results_data = None
+    if len(result_config) == 1:
+        with open(result_config[0], 'rb') as f:
+            FCeV_results_data = pickle.load(f)
+    else:
+        print(f"No config files: {len(result_config)}")
+    list_pandas = list()
+    for index_path in sorted(Path(result_path).rglob("*.pkl")):
+        with open(index_path, 'rb') as f:
+            x = pickle.load(f)
+            list_pandas.append(get_result_file(x,  FCeV_results_data,  SUMMARY_METRICS.CRPS, False))
+    df_result = pd.concat(list_pandas, names=["CF", "type", "component"])
+    return df_result, FCeV_results_data
 def read_result(result_path):
         all_dict = {}
         value_list = list()

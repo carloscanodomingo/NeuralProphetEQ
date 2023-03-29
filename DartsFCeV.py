@@ -269,9 +269,12 @@ class DartsFCeV:
 
         """
         start_forecast_time = end_datetime - self.FCeV_config.forecast_length
-        question_mark_start = (
-            start_forecast_time - self.FCeV_config.question_mark_length
-        )
+        if self.Darts_FCeV_config.covariate_type == "Past":
+            question_mark_start = (
+                start_forecast_time - self.FCeV_config.question_mark_length
+            )
+        else:
+            question_mark_start =  start_forecast_time
 
         df_events = self.df_events.iloc[self.df_events.index < question_mark_start]
         df_events = self.df_events.reindex(self.index_date).fillna(0.0)
