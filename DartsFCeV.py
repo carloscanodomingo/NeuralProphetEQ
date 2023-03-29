@@ -269,7 +269,7 @@ class DartsFCeV:
 
         """
         start_forecast_time = end_datetime - self.FCeV_config.forecast_length
-        if self.Darts_FCeV_config.covariate_type == "Past":
+        if self.Darts_FCeV_config.DartsModelConfig.covariate_type == "Past":
             question_mark_start = (
                 start_forecast_time - self.FCeV_config.question_mark_length
             )
