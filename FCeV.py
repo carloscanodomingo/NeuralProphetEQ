@@ -127,7 +127,7 @@ class FCeV:
                 "training_length": self.FCeV_config.question_mark_length,
                 "freq": self.FCeV_config.freq, 
                 "n_forecast": self.FCeV_model.n_forecasts,
-                "covariate_type": self.FCeV_model.Darts_FCeV_config.covariate_type,
+                "covariate_type": self.FCeV_model.Darts_FCeV_config.DartsModelConfig.covariate_type,
                 "n_forecast": self.FCeV_model.n_forecasts,
                }
 
