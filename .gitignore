@@ -44,6 +44,9 @@ Thumbs.db
 
 # Applications
 *.app
+*.pdf
+*.png
+*.jpeg
 *.exe
 *.war
 *.ckpt
