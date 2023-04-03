@@ -173,6 +173,7 @@ def configure(
         # Read SR and EQ data
     config_synthetic = "events"
     len_iteration = None
+    periods = 5
     if verbose == 0:
         sys.stdout = open(os.devnull, "w")
         sys.stderr = open(os.devnull, "w")
@@ -202,12 +203,13 @@ def configure(
         df_covariates = df.drop(input_columns, axis = 1)
         df_signal = df[input_columns]
         config_synthetic = "single"
-        len_iteration = pd.Timedelta(hours=12)
+        len_iteration = pd.Timedelta(hours=6)
         forecast_length = timedelta(hours=forecast_lenght_hours)
         question_mark_length = timedelta(hours=forecast_lenght_hours)
         # Time to take into account to predict
         historic_lenght = timedelta(days=historic_lenght)
         training_lenght = timedelta(days=training_lenght_days)
+        periods = 0
     elif  simulation_scenario == "TEC" or simulation_scenario == "TEC_constant" or simulation_scenario == "TEC_EQ":
         ConfigEQ_d = {
         "dist_start": 100,
@@ -412,7 +414,8 @@ def configure(
         "patience": patience,
         "seed": seed,
         "probabilistic": probabilistic,
-        "config_synthetic": config_synthetic
+        "config_synthetic": config_synthetic,
+         "periods": periods
     }
 
     darts_FCeV_config = DartsFCeVConfig(**darts_FCev_config)

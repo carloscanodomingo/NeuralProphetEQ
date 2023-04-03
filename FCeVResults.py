@@ -43,8 +43,10 @@ def get_result_file(df,  FCeV_results_data,  metric, mean):
     list_columns = [True if value in CF_events.index else False for value in df.columns.levels[0]]
     remove_columns = df.columns.levels[0][np.logical_not(list_columns)]
     
-    df_current = df["current"].sort_index().values
-    
+    df_current = df["current"].droplevel(0,1)
+    df_current = pd.melt(df_current, ignore_index=False)
+    df_current.columns = [ "input", "y"]
+    df_current = df_current.set_index(["input"], append = True)
     df_pred = df.drop(remove_columns, axis = 1, level = 0)
     num_components = len(df_pred.columns.levels[2])
 
@@ -55,11 +57,16 @@ def get_result_file(df,  FCeV_results_data,  metric, mean):
         if mean == True:
             group_CF = group_CF.mean(axis = 1,level=2)
         if metric == SUMMARY_METRICS.CRPS:
-            ds = pd.DataFrame(df_current, columns = ["y"], index = group_CF.index).to_xarray()
-            df_score  = pd.melt(group_CF.droplevel(0, 1), var_name='member', value_name='yhat', ignore_index=False)#.reset_index(drop=True)
-            df_score.set_index(["member"], append = True, inplace = True)
+            
+            df_score  = pd.melt(group_CF.droplevel(0,1), ignore_index=False)
+            df_score.columns = ["member", "input", "yhat"]
+            df_score = df_score.set_index(["member", "input"], append = True)
+        
+
+            ds = df_current.to_xarray()
             ds['yhat'] = df_score.to_xarray()['yhat']
-            dict_values[idx_CF] = ds.xs.crps_ensemble('y', 'yhat').to_numpy()
+
+            dict_values[idx_CF] =  ds.xs.crps_ensemble('y', 'yhat').to_numpy()
 
         if metric == SUMMARY_METRICS.CoV:
             df_current = np.tile(df_current, group_CF.shape[1] // num_components)
@@ -248,6 +255,7 @@ def plot_roc(df_result, current_values, CF_level, CF_hour,treshold_list, path):
 
     list_roc = list()
     list_index = list()
+    list_auc = list()
     for threshold in treshold_list:
         y_pred_prob = df_compress.mean(1)
         #y_test = (df_result["current"] >thrshold_precipitation)  & (df_result["current_time"] > 8) & ( df_result["current_time"] < 18)
@@ -257,21 +265,22 @@ def plot_roc(df_result, current_values, CF_level, CF_hour,treshold_list, path):
         pd_roc.columns = ["FPR", "TPR"]
         list_roc.append(pd_roc)
         list_index.append(f"{threshold}")
-
+        list_auc.append(sklearn.metrics.roc_auc_score(y_test,  y_pred_prob))
 
     pd_all_roc = pd.concat(list_roc, keys = list_index, axis =1)
-
+    pd_auc = pd.DataFrame(list_auc, index = list_index)
     if len(pd_all_roc.columns.levels[0]) > 1:
         pd_all_roc = pd_all_roc.unstack().unstack(level=1).reset_index(level=1, drop=True).rename_axis('level').reset_index()
     else:
         pd_all_roc = pd_all_roc.unstack().unstack(level=1).reset_index(level=1, drop=True).rename_axis('level').reset_index()
-    sns.set(rc={'figure.figsize':(10,10)})
+    sns.set(rc={'figure.figsize':(10,8)})
     sns.set_palette("pastel")
     sns.set(font_scale = size_seaborn_font)
     sns_plot = sns.lineplot(data=pd_all_roc, x="FPR", y="TPR", hue="level", linewidth=3)
     sns_plot.legend(title='Level', loc='lower right', frameon=True)
     fig = sns_plot.get_figure()
     fig.savefig(path, bbox_inches='tight')
+    return pd_auc
     
     
     
@@ -316,13 +325,23 @@ def plot_roc_hours(df_result, CF_level, CF_hour, path):
     sns_plot.legend(title='Level', loc='lower right', frameon=True)
     fig = sns_plot.get_figure()
     fig.savefig(path, bbox_inches='tight')
-def get_current(df_results, FCeV_results_data):
-    for row in df_results.itterrows():
-        df_results
-        expected = FCeV_results_data["df_events"].loc[df_pred.index]
-        result["current"] = np.max(expected.iloc[index_selected])[0]  
-        result["current_time"] = np.argmax(expected.iloc[index_selected])
-    
+def get_current(df_result, FCeV_results_data, past_window, future_window):
+    df_results = df_result.copy()
+
+    ground_truth = FCeV_results_data["df_events"]
+    forecast_length = FCeV_results_data["forecast_length"]
+    list_gt = list()
+    list_gt_position = list()
+    for current_date, row in df_results.iterrows():
+        select = (ground_truth.index > (current_date - past_window)) & ( ground_truth.index < (current_date + future_window))
+        #print( np.sum(select == True))
+        #break
+        current_ground_truth = ground_truth[select]
+        list_gt.append(np.max(current_ground_truth)[0]) 
+        list_gt_position.append(np.argmax(current_ground_truth))
+    df_results["current"] = np.array(list_gt)    
+    df_results["current_time"] = np.array(list_gt_position)   
+    return df_results
 def plot_violin_level(df_result, current_values, CF, path, limit = None):
     
     df_violin = df_result.copy()

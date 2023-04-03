@@ -202,13 +202,16 @@ class FCeV:
         self.iterations = pd.DataFrame(columns=["start_date", "end_date"])
         if len_iteration is None:
             len_iteration = self.FCeV_config.forecast_length
-        max_number_iteration = int((self.end_date- date_start- self.FCeV_config.forecast_length) // len_iteration)
+        max_number_iteration = int((self.end_date- date_start - self.FCeV_config.forecast_length) // len_iteration)
+        print((self.end_date- date_start - self.FCeV_config.forecast_length))
+        print(max_number_iteration)
         if n_iteration is None:
             n_iteration = max_number_iteration
         else:
             n_iteration = n_iteration if max_number_iteration > n_iteration else max_number_iteration
+        n_iteration = max_number_iteration
         for index_iter in range(n_iteration):
-            end_fold = date_start  + (index_iter * self.FCeV_config.forecast_length)
+            end_fold = date_start  + (index_iter * len_iteration)
             index_end_fold = np.argmin(np.abs(self.index_dates - end_fold))
             end_fold = self.index_dates[index_end_fold]
             start_fold = end_fold - self.FCeV_config.training_length

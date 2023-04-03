@@ -53,7 +53,9 @@ class DartsFCeVConfig:
     patience: int
     seed: int
     probabilistic: bool
+    periods: int
     config_synthetic: str = "single"
+
 
 @dataclass
 class TCNDartsFCeVConfig(metaclass = DartModelMetaClass):
@@ -153,7 +155,7 @@ class DartsFCeV:
         if synthetic_events.empty:
             self.synthetic_events = None  # self.get_synthetic_events()
         else:
-            self.synthetic_events = self.prepare_synthetic_events(synthetic_events)
+            self.synthetic_events = self.prepare_synthetic_events(synthetic_events, self.Darts_FCeV_config.periods)
 
         self.index_date = df_input.index
         self.df_events = self.df_events.reindex(self.index_date).fillna(0.0)
@@ -235,8 +237,7 @@ class DartsFCeV:
     
     
     
-    def prepare_synthetic_events(self,synthetic_events):
-        periods =5
+    def prepare_synthetic_events(self,synthetic_events, periods = 5):
         if synthetic_events is None:
             raise ValueError("Syntheticevents not valid")
         all_dict = {}
