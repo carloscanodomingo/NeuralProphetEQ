@@ -211,7 +211,7 @@ def configure(
         # Time to take into account to predict
         historic_lenght = timedelta(days=historic_lenght)
         training_lenght = timedelta(days=training_lenght_days)
-        periods = 0
+        periods = 1
     elif  simulation_scenario == "TEC" or simulation_scenario == "TEC_constant" or simulation_scenario == "TEC_EQ":
         ConfigEQ_d = {
         "dist_start": 100,
