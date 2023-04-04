@@ -246,9 +246,9 @@ def plot_roc(df_result, current_values, CF_level, CF_hour,treshold_list, path):
     df_compress = df_compress[CF_level]
     df_compress.head()
 
-    df_compress = df_compress.mean(level=1, axis = 1)
+    df_compress = df_compress.min(level=1, axis = 1)
     df_compress = df_compress[CF_hour]
-    df_compress = df_compress.mean(1)
+    df_compress = df_compress.min(1)
     df_compress = -(df_compress.values.T  /df_ref.values.T)
     df_compress = pd.DataFrame(df_compress).T
 
