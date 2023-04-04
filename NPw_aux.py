@@ -343,8 +343,8 @@ def read_irradiance_data(path_data, site):
     return df_irradiance
 def prepare_HM_data(path_data, site, freq, start_time):
     df_eq = read_EQ_data(path_data + eq_path)
-    if site == "HM001":
-        mean_location = {"latitude": 37.134493, "longitude":-122.118413}
+    locations = pd.read_csv(path_data + "SR/HM_location.csv", index_col=0).T
+    mean_location = {"latitude": locations[site].Latitude, "longitude":locations[site].Longitude}
     df_eq = process_eq(
         df_eq, mean_location=mean_location, freq=freq, start_time = start_time
     )

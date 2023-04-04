@@ -82,6 +82,7 @@ from DartsFCeV import NLinearDartsFCeVConfig,TransformerDartsFCeVConfig, DartsFC
             ),
         default = "TEC_EQ"
         )
+@click.option("--HM", type=int, required=False)
 
 
 # TCN Model
@@ -151,6 +152,7 @@ def configure(
     n_iteration,
     seed,
     simulation_scenario,
+    hm=None,
     tcn_dilation_base=None,
     tcn_weight_norm=None,
     rnn_model=None,
@@ -189,12 +191,12 @@ def configure(
         config_events = ConfigEQ(**ConfigEQ_d)
         date_start = pd.Timestamp(year= 2019, month=6, day = 1)
         dateparse = lambda x: datetime.strptime(x, "%d-%b-%Y %H:%M:%S")
-        df = pd.read_csv(data_path + "SR/SR_HM_001.csv", parse_dates=['time'], date_parser=dateparse)
+        site = "HM00" + str(hm)
+        df = pd.read_csv(data_path + "SR/" + site + ".csv", parse_dates=['time'], date_parser=dateparse)
         df = df.rename(columns={"time": "ds"}).set_index("ds")
         input_columns = ["A1", "B1", "C1"]
         freq = timedelta(hours=1)
         start_time = df.index[0]
-        site = "HM001"
         df_eq = NPw_aux.prepare_HM_data(data_path, site, freq, start_time)
         df_events = prepare_EQ(df_eq, config_events)    
         df_events = df_events[(df_events.index > df.index[0]) & (df_events.index < df.index[-1])]
