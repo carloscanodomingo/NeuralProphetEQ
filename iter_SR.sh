@@ -36,7 +36,7 @@ module load apps/binapps/anaconda3/2021.11
 conda activate neuralprophet
 module load apps/gcc/R/4.0.2
 echo "running: ${BINDIR}/$RUNNER \$((\$SGE_TASK_ID - 1))"
-${BINDIR}/$RUNNER CONFIG 23 1234567 --historic_lenght=40 --training_lenght_days=192 --learning_rate=3 --dropout=0.4 --batch_size=600 --epochs=300 --n_layers=1 --internal_size=8 --use_gpu=0 --probabilistic=1 --patience=25 offset_start=730 --verbose=0 --data_path=/mnt/hum01-home01/ambs/y06068cc/data/ --out_path=/mnt/hum01-home01/ambs/y06068cc/output/results/HM001_ --model=RNN --RNN_model=GRU --HM=1 --forecast_type=iteration --total_index=$nruns --current_index=\$((\$SGE_TASK_ID - 1)) --forecast_lenght_hours=24
+${BINDIR}/$RUNNER CONFIG 23 1234567 --historic_lenght=40  --simulation_scenario=SR --training_lenght_days=365  --learning_rate=3 --dropout=0.4 --batch_size=600 --epochs=300 --n_layers=1 --internal_size=8 --use_gpu=0 --probabilistic=1 --patience=25 offset_start=730 --verbose=0 --data_path=/mnt/hum01-home01/ambs/y06068cc/data/ --out_path=/mnt/hum01-home01/ambs/y06068cc/output/results/HM001_ --model=RNN --RNN_model=GRU --HM=1 --forecast_type=iteration --total_index=$nruns --current_index=\$((\$SGE_TASK_ID - 1)) --forecast_lenght_hours=24
 EOF
 }
 
