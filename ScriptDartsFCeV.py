@@ -179,6 +179,7 @@ def configure(
     if verbose == 0:
         sys.stdout = open(os.devnull, "w")
         sys.stderr = open(os.devnull, "w")
+    print(simulation_scenario)
     if simulation_scenario == "SR":
         ConfigEQ_d = {
             "dist_start": 100,
@@ -393,6 +394,9 @@ def configure(
         date_start = pd.Timestamp(2017, 1, 1)
     else:
         raise KeyError("Simulation type not implemented")
+        
+        
+        
     if model == "TCN":
         TCN_darts_FCeV_config = {
             "dilation_base": tcn_dilation_base,
