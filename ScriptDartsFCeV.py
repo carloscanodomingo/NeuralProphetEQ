@@ -181,6 +181,43 @@ def configure(
         sys.stderr = open(os.devnull, "w")
     if simulation_scenario == "SR":
         ConfigEQ_d = {
+            "dist_start": 100,
+            "dist_delta": 30000,
+            "mag_start": 5,
+            "mag_delta": 0.5,
+            "filter": 1,
+            "drop": ["arc_cos", "arc_sin", "pr"],
+        }
+        config_events = ConfigEQ(**ConfigEQ_d)
+        date_start = pd.Timestamp(year= 2019, month=6, day = 1)
+        dateparse = lambda x: datetime.strptime(x, "%d-%b-%Y %H:%M:%S")
+        site = "HM00" + str(hm)
+        df = pd.read_csv(data_path + "SR/" + site + ".csv", parse_dates=['time'], date_parser=dateparse)
+        df = df.rename(columns={"time": "ds"}).set_index("ds")
+        input_columns = ["A1", "B1", "C1"]
+        freq = timedelta(hours=1)
+        start_time = df.index[0]
+        df_eq = NPw_aux.prepare_HM_data(data_path, site, freq, start_time)
+        df_events = prepare_EQ(df_eq, config_events)    
+        df_events = df_events[(df_events.index > df.index[0]) & (df_events.index < df.index[-1])]
+        values_mag = np.arange(5,8,1)
+        values_dist = np.log10(np.linspace(500, 10000, 4)).round(2)
+        values_depth = np.log10(np.linspace(10, 10000, 2)).round(2)
+        depth, mag, dist = np.meshgrid(values_depth, values_mag, values_dist)
+        df_synth = pd.DataFrame([depth.flatten(), mag.flatten(), dist.flatten()]).T
+        df_synth.columns = ["depth", "mag", "dist"]
+        df_covariates = df.drop(input_columns, axis = 1)
+        df_signal = df[input_columns]
+        config_synthetic = "single"
+        len_iteration = pd.Timedelta(hours=6)
+        forecast_length = timedelta(hours=forecast_lenght_hours)
+        question_mark_length = timedelta(hours=forecast_lenght_hours)
+        # Time to take into account to predict
+        historic_lenght = timedelta(days=historic_lenght)
+        training_lenght = timedelta(days=training_lenght_days)
+        periods = 1
+    if simulation_scenario == "SRPR":
+        ConfigEQ_d = {
             "dist_start": 3000,
             "dist_delta": 30000,
             "mag_start": 6,

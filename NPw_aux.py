@@ -209,8 +209,8 @@ def prepare_EQ(
     if config_eq.filter == 1:
         df_events = df_events.loc[df_events["pr"] > 1]
     df_events_copy = df_events.copy()
-    df_events_copy["depth"] = -df_events["depth"]
-    df_events_copy["dist"] = -df_events["dist"]
+    df_events_copy["depth"] = np.log10(df_events["depth"])
+    df_events_copy["dist"] = np.log10(df_events["dist"])
     if config_eq.filter:
         df_events_copy = df_events_copy.drop(config_eq.drop, axis=1)
     return (df_events_copy)

@@ -2,6 +2,8 @@
 set -e
 set -o pipefail
 
+hm=$1
+echo $hm
 # Find our own location.
 BINDIR=$(dirname "$(readlink -f "$(type -P $0 || echo $0)")")
 OUTDIR="$HOME/scratch/"
@@ -37,13 +39,14 @@ module load apps/binapps/anaconda3/2021.11
 conda activate neuralprophet
 module load apps/gcc/R/4.0.2
 echo "running: ${BINDIR}/$RUNNER \$((\$SGE_TASK_ID - 1))"
-${BINDIR}/$RUNNER CONFIG 23 1234567 --historic_lenght=29  --simulation_scenario=SR --HM=$hm --training_lenght_days=179 --learning_rate=3 --dropout=0.1 --batch_size=400 --epochs=300 --n_layers=7 --internal_size=12 --use_gpu=0 --probabilistic=1 --patience=10 offset_start=730 --verbose=0 --data_path=/mnt/hum01-home01/ambs/y06068cc/data/ --out_path=/mnt/hum01-home01/ambs/y06068cc/output/results/HM00$hm --model=TCN --TCN_dilation_base=4 --TCN_weight_norm=1 --forecast_type=iteration --total_index=$nruns --current_index=\$((\$SGE_TASK_ID - 1)) --forecast_lenght_hours=24
+${BINDIR}/$RUNNER CONFIG 23 1234567 --historic_lenght=40 --simulation_scenario=SR  --HM=$hm --training_lenght_days=1920 --learning_rate=4 --dropout=0.2 --batch_size=600 --epochs=300 --n_layers=3 --internal_size=32 --use_gpu=0 --probabilistic=1 --patience=25 offset_start=730 --verbose=0 --data_path=/mnt/hum01-home01/ambs/y06068cc/data/ --out_path=/mnt/hum01-home01/ambs/y06068cc/output/results/HM00$hm_ --model=RNN --RNN_model=GRU --forecast_type=iteration --total_index=$nruns --current_index=\$((\$SGE_TASK_ID - 1)) --forecast_lenght_hours=24 
 EOF
 }
 
-
-hm=$1
-echo $hm
+hm = 1
 nruns=1
 LAUNCHER=qsub_job
 $LAUNCHER ScriptDartsFCeV.py $nruns $hm
+
+
+

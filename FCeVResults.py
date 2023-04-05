@@ -334,11 +334,13 @@ def get_current(df_result, FCeV_results_data, past_window, future_window):
     list_gt_position = list()
     for current_date, row in df_results.iterrows():
         select = (ground_truth.index > (current_date - past_window)) & ( ground_truth.index < (current_date + future_window))
-        #print( np.sum(select == True))
-        #break
         current_ground_truth = ground_truth[select]
-        list_gt.append(np.max(current_ground_truth)[0]) 
-        list_gt_position.append(np.argmax(current_ground_truth))
+        if not current_ground_truth.size:
+            list_gt.append(0) 
+            list_gt_position.append(0)
+        else:
+            list_gt.append(np.max(current_ground_truth)[0]) 
+            list_gt_position.append(np.argmax(current_ground_truth))
     df_results["current"] = np.array(list_gt)    
     df_results["current_time"] = np.array(list_gt_position)   
     return df_results
