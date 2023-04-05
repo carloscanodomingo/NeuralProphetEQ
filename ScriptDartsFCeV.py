@@ -210,14 +210,14 @@ def configure(
         df_covariates = df.drop(input_columns, axis = 1)
         df_signal = df[input_columns]
         config_synthetic = "single"
-        len_iteration = pd.Timedelta(hours=6)
+        len_iteration = pd.Timedelta(hours=12)
         forecast_length = timedelta(hours=forecast_lenght_hours)
         question_mark_length = timedelta(hours=forecast_lenght_hours)
         # Time to take into account to predict
         historic_lenght = timedelta(days=historic_lenght)
         training_lenght = timedelta(days=training_lenght_days)
         periods = 1
-    if simulation_scenario == "SRPR":
+    elif simulation_scenario == "SRPR":
         ConfigEQ_d = {
             "dist_start": 3000,
             "dist_delta": 30000,
