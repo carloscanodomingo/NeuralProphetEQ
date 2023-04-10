@@ -246,9 +246,9 @@ def plot_roc(df_result, current_values, CF_level, CF_hour,treshold_list, path):
     df_compress = df_compress[CF_level]
     df_compress.head()
 
-    df_compress = df_compress.min(level=1, axis = 1)
+    df_compress = df_compress.mean(level=1, axis = 1)
     df_compress = df_compress[CF_hour]
-    df_compress = df_compress.min(1)
+    df_compress = df_compress.mean(1)
     df_compress = -(df_compress.values.T  /df_ref.values.T)
     df_compress = pd.DataFrame(df_compress).T
 
@@ -260,12 +260,13 @@ def plot_roc(df_result, current_values, CF_level, CF_hour,treshold_list, path):
         y_pred_prob = df_compress.mean(1)
         #y_test = (df_result["current"] >thrshold_precipitation)  & (df_result["current_time"] > 8) & ( df_result["current_time"] < 18)
         y_test = (df_result["current"] > threshold)  
-        FPR, TPR, _ = sklearn.metrics.roc_curve(y_test,  y_pred_prob, drop_intermediate = False)
-        pd_roc = pd.DataFrame([FPR,TPR]).T
-        pd_roc.columns = ["FPR", "TPR"]
-        list_roc.append(pd_roc)
-        list_index.append(f"{threshold}")
-        list_auc.append(sklearn.metrics.roc_auc_score(y_test,  y_pred_prob))
+        if len(y_test.unique()) > 1:
+            FPR, TPR, _ = sklearn.metrics.roc_curve(y_test,  y_pred_prob, drop_intermediate = False)
+            pd_roc = pd.DataFrame([FPR,TPR]).T
+            pd_roc.columns = ["FPR", "TPR"]
+            list_roc.append(pd_roc)
+            list_index.append(f"{threshold}")
+            list_auc.append(sklearn.metrics.roc_auc_score(y_test,  y_pred_prob))
 
     pd_all_roc = pd.concat(list_roc, keys = list_index, axis =1)
     pd_auc = pd.DataFrame(list_auc, index = list_index)
@@ -325,10 +326,9 @@ def plot_roc_hours(df_result, CF_level, CF_hour, path):
     sns_plot.legend(title='Level', loc='lower right', frameon=True)
     fig = sns_plot.get_figure()
     fig.savefig(path, bbox_inches='tight')
-def get_current(df_result, FCeV_results_data, past_window, future_window):
+def get_current(df_result, ground_truth, FCeV_results_data, past_window, future_window):
     df_results = df_result.copy()
 
-    ground_truth = FCeV_results_data["df_events"]
     forecast_length = FCeV_results_data["forecast_length"]
     list_gt = list()
     list_gt_position = list()
@@ -339,23 +339,44 @@ def get_current(df_result, FCeV_results_data, past_window, future_window):
             list_gt.append(0) 
             list_gt_position.append(0)
         else:
-            list_gt.append(np.max(current_ground_truth)[0]) 
+            list_gt.append(np.max(current_ground_truth)) 
             list_gt_position.append(np.argmax(current_ground_truth))
     df_results["current"] = np.array(list_gt)    
     df_results["current_time"] = np.array(list_gt_position)   
     return df_results
-def plot_violin_level(df_result, current_values, CF, path, limit = None):
+def select_CF_level(df, synth):
+    list_CF = list()
+    for key, value in synth.items():
+        keys = key.split("-")
+        if (len(keys) > 1):
+            if (keys[1] == "0"):
+                valid = True
+                for name, serie in df.iterrows():
+                    current_value = np.max(value[name])
+                    if (current_value < serie["low"]) or (current_value > serie["high"]):
+                        valid = False
+                        break;
+                if valid == True:
+                    list_CF.append(keys[0])
+    return list_CF
+
+def plot_violin_level(df_result, current_values, CF_hour, path, limit = None, CF_level = None):
     
     df_violin = df_result.copy()
     df_violin.columns = df_violin.columns.str.split("-", expand=True)
     column = df_violin.pop("EMPTY")
     ref = column
     df_violin = df_violin.drop(["current", "current_time"], 1)
-    df_violin = df_violin.loc[:, pd.IndexSlice[:, CF]]
+    df_violin = df_violin.loc[:, pd.IndexSlice[:, CF_hour]]
     df_violin = pd.DataFrame(df_violin.T.values / ref.T.values, index = df_violin.columns).T
+    
+    df_violin = df_violin.droplevel(1,axis = 1)
+    if CF_level is not None:
+        df_violin = df_violin[CF_level]
     df_violin["class"] = current_values
     sns.set(rc={'figure.figsize':(20,8)})
     df_violin = pd.melt(df_violin, id_vars="class",var_name='hypotesis Level', value_name='CFR')
+    df_violin['hypotesis Level'] = df_violin['hypotesis Level'].astype(int)
     sns.set(font_scale = size_seaborn_font)
     if len((df_violin["class"].unique() == 2)):
         split = True
