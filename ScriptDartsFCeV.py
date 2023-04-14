@@ -78,7 +78,7 @@ from DartsFCeV import NLinearDartsFCeVConfig,TransformerDartsFCeVConfig, DartsFC
 @click.option(
         "--simulation_scenario",
         type = click.Choice(
-            ["SR", "TEC", "SALES", "TEC_constant", "TEC_EQ", "trafic", "irradiance"]
+            ["SRPR", "SR", "TEC", "SALES", "TEC_constant", "TEC_EQ", "trafic", "irradiance"]
             ),
         default = "TEC_EQ"
         )
