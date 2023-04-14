@@ -201,8 +201,6 @@ def configure(
         elif simulation_scenario == "SRPR":     
             values = np.arange(0,11,1)
             df_synth = pd.DataFrame(values, columns= ["pr"])
-        df_covariates = df.drop(input_columns, axis = 1)
-        df_signal = df[input_columns]
         date_start = pd.Timestamp(year= 2019, month=6, day = 1)
         dateparse = lambda x: datetime.strptime(x, "%d-%b-%Y %H:%M:%S")
         site = "HM00" + str(hm)
@@ -212,6 +210,8 @@ def configure(
         freq = timedelta(hours=1)
         start_time = df.index[0]
         df_eq = NPw_aux.prepare_HM_data(data_path, site, freq, start_time)
+        df_signal = df[input_columns]
+        df_covariates = df.drop(input_columns, axis = 1)
         df_events = prepare_EQ(df_eq, config_events)    
         df_events = df_events[(df_events.index > df.index[0]) & (df_events.index < df.index[-1])]
         config_synthetic = "single"
